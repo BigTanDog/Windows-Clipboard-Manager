@@ -500,38 +500,9 @@ internal static class NativeMethods
     [DllImport("dwmapi.dll", SetLastError = true)]
     internal static extern int DwmSetWindowAttribute(IntPtr hWnd, int attribute, ref int value, int size);
 
-    // ────────────────────── user32.dll：窗口合成（亚克力背景） ──────────────────────
-
-    /// <summary>
-    /// 设置窗口合成属性（<b>未公开 API</b>）。作用：给窗口加系统亚克力（模糊 + 染色）背景（附加项 B-04）。
-    /// 注意事项：
-    /// ① 结构体与常量来自社区逆向，不同 Windows 版本可能失效，调用失败必须静默降级（外观增强不影响功能）；
-    /// ② <c>ACCENT_POLICY.GradientColor</c> 是 <b>0xAABBGGRR</b>（ABGR 顺序，不是 ARGB）；
-    /// ③ 只有窗口允许逐像素透明（WPF 侧 <c>AllowsTransparency=true</c>）时才看得见模糊，
-    /// 否则会被不透明的窗口内容整片盖住；
-    /// ④ 数据块必须是非托管内存（本封装在调用方用 <c>Marshal.AllocHGlobal</c> 分配并释放）。
-    /// </summary>
-    [DllImport("user32.dll", SetLastError = true)]
-    internal static extern int SetWindowCompositionAttribute(IntPtr hWnd, ref WINDOWCOMPOSITIONATTRIBDATA data);
-}
-
-/// <summary>窗口合成策略（<c>SetWindowCompositionAttribute</c> 的 <c>ACCENT_POLICY</c>）。</summary>
-[StructLayout(LayoutKind.Sequential)]
-internal struct ACCENTPOLICY
-{
-    public int AccentState;
-    public int AccentFlags;
-    public int GradientColor;
-    public int AnimationId;
-}
-
-/// <summary>窗口合成属性入参（数据块由调用方分配非托管内存，见 <see cref="NativeMethods.SetWindowCompositionAttribute"/>）。</summary>
-[StructLayout(LayoutKind.Sequential)]
-internal struct WINDOWCOMPOSITIONATTRIBDATA
-{
-    public int Attribute;
-    public IntPtr Data;
-    public int SizeOfData;
+    // 说明：这里刻意没有 SetWindowCompositionAttribute（窗口合成/亚克力）——
+    // 该未公开接口在逐像素透明窗口上不稳定（accent 4 在 Win11 不模糊、accent 3 会随时间破坏合成），
+    // 附加项 B-04 最终改用 WPF 半透明实现，来龙去脉见 Core/Ui/AcrylicTint 与 docs/产品计划文档.md §9.2。
 }
 
 /// <summary>

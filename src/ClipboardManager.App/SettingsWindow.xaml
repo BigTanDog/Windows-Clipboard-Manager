@@ -131,7 +131,7 @@
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
-                    <TextBlock Grid.Column="0" VerticalAlignment="Center" Text="亚克力强度" />
+                    <TextBlock Grid.Column="0" VerticalAlignment="Center" Text="面板透明度" />
                     <Slider x:Name="AcrylicSlider"
                             Grid.Column="1"
                             Margin="0,0,4,0"
@@ -140,19 +140,19 @@
                             IsSnapToTickEnabled="True"
                             TickFrequency="5"
                             ValueChanged="OnAcrylicStrengthChanged"
-                            ToolTip="0 = 关闭（不透明）；数值越大越透，模糊越明显" />
+                            ToolTip="0 = 不透明；数值越大越透（最多 35%）" />
                     <TextBlock x:Name="AcrylicValueText"
                                Grid.Column="2"
                                MinWidth="62"
                                VerticalAlignment="Center"
                                Foreground="{DynamicResource MutedTextBrush}"
-                               Text="0（关闭）" />
+                               Text="0（不透明）" />
                 </Grid>
                 <TextBlock Margin="150,0,0,14"
                            TextWrapping="Wrap"
                            FontSize="12"
                            Foreground="{DynamicResource MutedTextBrush}"
-                           Text="拖动即时预览面板效果；0 = 不透明。系统不支持模糊时只保留半透明底色。" />
+                           Text="拖动即时预览面板效果；0 = 不透明，最高 35%（保证内容可读）。" />
 
                 <!-- ─────────── 启动与排除 ─────────── -->
                 <TextBlock FontWeight="SemiBold" Margin="0,4,0,8" Text="启动与排除" />

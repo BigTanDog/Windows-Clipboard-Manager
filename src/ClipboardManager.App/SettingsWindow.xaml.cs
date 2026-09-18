@@ -179,7 +179,7 @@ public partial class SettingsWindow : Window
         }
 
         var strength = (int)Math.Round(e.NewValue);
-        AcrylicValueText.Text = strength <= 0 ? "0（关闭）" : strength.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        AcrylicValueText.Text = strength <= 0 ? "0（不透明）" : strength.ToString(System.Globalization.CultureInfo.InvariantCulture);
         _previewAcrylic(strength);
     }
 

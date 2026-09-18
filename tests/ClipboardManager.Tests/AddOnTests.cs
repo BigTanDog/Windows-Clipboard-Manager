@@ -55,27 +55,16 @@ public sealed class AddOnTests : IDisposable
 
     [Theory]
     [InlineData(0, 100)]   // 关闭时完全不透明
-    [InlineData(50, 65)]   // 半强度：保留 65% 底色
-    [InlineData(100, 30)]  // 拉满仍保留最低可读底限（30%）
+    [InlineData(50, 82)]   // 半强度：保留 82% 底色
+    [InlineData(100, 65)]  // 拉满也保留 65% 底色（按用户要求"别做那么透明"）
     public void 强度映射为底色不透明度(int strength, int expectedPercent) =>
         Assert.Equal(expectedPercent, AcrylicTint.OpacityPercent(strength));
 
     [Theory]
     [InlineData(0, 255)]
-    [InlineData(100, 76)]   // 255 × 30% = 76.5，Math.Round 用银行家舍入取偶 → 76
+    [InlineData(100, 166)]
     public void 不透明度映射为_alpha_字节(int strength, int expectedAlpha) =>
         Assert.Equal(expectedAlpha, AcrylicTint.AlphaByte(strength));
-
-    [Fact]
-    public void 颜色按_ABGR_打包()
-    {
-        // ACCENT_POLICY.GradientColor 是 0xAABBGGRR：低字节是红，与常见的 ARGB 相反。
-        var packed = AcrylicTint.PackAbgr(0x11, 0x22, 0x33, 0);
-
-        Assert.Equal(0xFF332211u, packed);
-        Assert.Equal(0x11u, packed & 0xFF);              // 红在最前（低字节）
-        Assert.Equal(0xFFu, (packed >> 24) & 0xFF);      // 强度 0 → alpha 满
-    }
 
     // ─────────────── 设置项（B-01 / B-04） ───────────────
 
