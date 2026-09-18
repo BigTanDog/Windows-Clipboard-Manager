@@ -7,6 +7,19 @@ Windows 剪贴板历史工具：常驻托盘，热键唤出面板，记录**文�
 - 技术栈：.NET 8 + WPF；SQLite（`Microsoft.Data.Sqlite`，手写 SQL，不用 EF）；手写 P/Invoke（不引 CsWin32）
 - 默认热键：`Ctrl + Shift + V`（可在设置中修改）
 
+## 下载（免构建直接用）
+
+仓库 `release/` 目录附了两种形态的可执行文件，按需下载一个即可：
+
+| 文件 | 体积 | 适用 |
+| --- | --- | --- |
+| `ClipboardManager_小体积_需装NET8运行时.exe` | 2.85 MB | 电脑上已装（或愿意装）[.NET 8 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/8.0)，日常使用推荐 |
+| `ClipboardManager_完整版_免装运行时.exe` | 64.39 MB | 不想装运行时；拷到 U 盘 / 新机器直接双击 |
+
+- 下载后放到**任意可写目录**（如 `D:\Tools\ClipboardManager\`）双击运行；数据全部写在 exe 同目录的 `data\` 里，整个文件夹拷走即完成迁移。
+- 首次运行如果没看到托盘图标，检查 Windows 是否把它收进了「隐藏的图标」，可拖到可见区。
+- 说明：这两个文件随源码一起走 Git 历史，每次更新版本仓库体积都会增长；若将来发版频繁，建议改用 GitHub Releases。
+
 ## 功能
 
 | 能力 | 说明 |
