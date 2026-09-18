@@ -29,6 +29,12 @@ public partial class PanelWindow : Window
     private readonly DispatcherTimer _searchDebounce;
     private bool _contextMenuOpen;
     private bool _singleClickPaste;
+    private bool _accentPending;
+
+    /// <summary>最近一次交给 DWM 的模糊参数（强度 + 打包颜色），用于跳过重复申请。</summary>
+    private long _lastAccentKey = -1;
+    private int _accentStrength;
+    private Color _accentSurface = Colors.Transparent;
 
     /// <summary>创建面板。</summary>
     public PanelWindow()
@@ -73,14 +79,22 @@ public partial class PanelWindow : Window
     /// 强度 0 = 完全不透明，等价于原来的纯色面板；强度越大底色越透、系统模糊越明显。
     /// 窗口本身已是逐像素透明，所以这里只改底色的 alpha。
     /// </para>
+    /// <para>
+    /// ⚠️ <b>面板隐藏时不能向 DWM 申请模糊</b>（2026-09-19 用户实测）：设置页拖滑杆会连续触发预览，
+    /// 若在隐藏状态下反复调用 <c>SetWindowCompositionAttribute</c>，分层窗口的合成会被破坏 ——
+    /// 再显示时内容只剩"鬼影"（背景一闪而过）。因此这里只更新 WPF 底色并记账（<see cref="_accentPending"/>），
+    /// 等面板真正显示并渲染完（<see cref="OnContentRendered"/>）再向 DWM 申请。
+    /// </para>
     /// </summary>
     /// <param name="strength">亚克力强度 0–100。</param>
     /// <param name="surfaceColor">当前主题的面板底色。</param>
     /// <param name="headerColor">当前主题的标题栏/状态栏底色。</param>
     public void ApplyAcrylic(int strength, Color surfaceColor, Color headerColor)
     {
-        var alpha = (byte)AcrylicTint.AlphaByte(strength);
+        _accentStrength = AcrylicTint.Normalize(strength);
+        _accentSurface = surfaceColor;
 
+        var alpha = (byte)AcrylicTint.AlphaByte(_accentStrength);
         RootSurface.Background = new SolidColorBrush(Color.FromArgb(alpha, surfaceColor.R, surfaceColor.G, surfaceColor.B));
 
         // 标题栏/状态栏比主体略实一点：那里是小字号提示，透明过头会看不清。
@@ -88,6 +102,45 @@ public partial class PanelWindow : Window
         var headerBrush = new SolidColorBrush(Color.FromArgb(headerAlpha, headerColor.R, headerColor.G, headerColor.B));
         HeaderBar.Background = headerBrush;
         FooterBar.Background = headerBrush;
+
+        if (IsVisible)
+        {
+            ApplyBlurBehind();
+        }
+        else
+        {
+            _accentPending = AcrylicTint.IsEnabled(_accentStrength);
+        }
+    }
+
+    /// <summary>向 DWM 申请（或关闭）模糊背景；相同参数重复调用会被跳过，避免拖滑杆时反复刷合成。</summary>
+    private void ApplyBlurBehind()
+    {
+        var gradient = AcrylicTint.IsEnabled(_accentStrength)
+            ? AcrylicTint.PackAbgr(_accentSurface.R, _accentSurface.G, _accentSurface.B, _accentStrength)
+            : 0;
+        var key = ((long)_accentStrength << 32) | gradient;
+        if (key == _lastAccentKey)
+        {
+            _accentPending = false;
+            return;
+        }
+
+        _lastAccentKey = key;
+        _ = WindowAppearance.ApplyAcrylic(new WindowInteropHelper(this).Handle, _accentStrength, _accentSurface.R, _accentSurface.G, _accentSurface.B);
+        _accentPending = false;
+    }
+
+    /// <inheritdoc />
+    protected override void OnContentRendered(EventArgs e)
+    {
+        base.OnContentRendered(e);
+
+        // 面板显示期间被记账的模糊申请，在这里补上（此时分层窗口已完成合成，不会再被破坏）。
+        if (_accentPending)
+        {
+            ApplyBlurBehind();
+        }
     }
 
     /// <summary>失去激活：按设置自动隐藏（右键菜单打开期间不隐藏，否则菜单会被连带关掉）。</summary>

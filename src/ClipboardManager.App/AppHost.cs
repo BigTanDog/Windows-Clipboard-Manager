@@ -521,6 +521,7 @@ internal sealed class AppHost : IDisposable
 
     /// <summary>
     /// 刷新面板外观：DWM 圆角与标题栏配色 + 底色与亚克力强度（B-04，含滑杆预览值）。
+    /// DWM 模糊申请由面板自己负责（隐藏时只记账，显示渲染后再申请——见 PanelWindow.ApplyAcrylic）。
     /// </summary>
     private void ApplyPanelAppearance()
     {
@@ -531,23 +532,10 @@ internal sealed class AppHost : IDisposable
         }
 
         ApplyWindowAppearance(panel);
-
-        var strength = _acrylicPreview ?? _settings.AcrylicStrength;
-        var surface = ReadThemeColor("PanelBackgroundBrush");
-        var header = ReadThemeColor("HeaderBackgroundBrush");
-        panel.ApplyAcrylic(strength, surface, header);
-
-        var applied = Interop.WindowAppearance.ApplyAcrylic(
-            new WindowInteropHelper(panel).Handle,
-            strength,
-            surface.R,
-            surface.G,
-            surface.B);
-
-        if (AcrylicTint.IsEnabled(strength) && !applied)
-        {
-            _log.Diag("亚克力模糊未生效（系统不支持时只保留半透明底色）");
-        }
+        panel.ApplyAcrylic(
+            _acrylicPreview ?? _settings.AcrylicStrength,
+            ReadThemeColor("PanelBackgroundBrush"),
+            ReadThemeColor("HeaderBackgroundBrush"));
     }
 
     /// <summary>设置窗口拖动强度滑杆时的即时预览（不落盘，关窗时由窗口回退）。</summary>
