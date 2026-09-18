@@ -33,6 +33,18 @@ internal static class NativeMethods
     /// <summary>纯文本剪贴板格式（UTF-16，NUL 结尾）。</summary>
     internal const uint CF_UNICODETEXT = 13;
 
+    /// <summary>设备无关位图（无 BMP 文件头，直接是 BITMAPINFOHEADER + 像素）。</summary>
+    internal const uint CF_DIB = 8;
+
+    /// <summary>带颜色空间的设备无关位图（BITMAPV5HEADER，支持 alpha）。</summary>
+    internal const uint CF_DIBV5 = 17;
+
+    /// <summary>文件路径列表（DROPFILES 结构 + 双 NUL 结尾的路径列表）。</summary>
+    internal const uint CF_HDROP = 15;
+
+    /// <summary>DragQueryFileW 的特殊索引：取路径条数。</summary>
+    internal const uint DragQueryFileCount = 0xFFFFFFFF;
+
     /// <summary>GlobalAlloc：可移动内存块（剪贴板要求）。</summary>
     internal const uint GMEM_MOVEABLE = 0x0002;
 
@@ -278,6 +290,13 @@ internal static class NativeMethods
     [DllImport("user32.dll", SetLastError = true)]
     internal static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
 
+    /// <summary>
+    /// 注册（或查询）自定义剪贴板格式。作用：拿到 "HTML Format" 的格式 ID（同名字符串在系统内唯一）。
+    /// 注意事项：返回 0 表示失败（内存不足等）；结果应缓存复用，不要每次调用。
+    /// </summary>
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    internal static extern uint RegisterClipboardFormatW(string lpszFormat);
+
     // ────────────────────── kernel32.dll：全局内存 ──────────────────────
 
     /// <summary>分配全局内存。作用：为剪贴板内容准备 HGLOBAL（必须 GMEM_MOVEABLE）。注意事项：返回 0 表示失败；失败路径必须自行释放，不要泄漏。</summary>
@@ -348,6 +367,17 @@ internal static class NativeMethods
     /// <summary>取窗口类名。作用：诊断「Ctrl+V 到底注入到了哪个窗口」。注意事项：只取类名，不取标题，避免把用户内容写进日志。</summary>
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     internal static extern int GetClassNameW(IntPtr hWnd, [Out] char[] lpClassName, int nMaxCount);
+
+    // ────────────────────── shell32.dll：拖放 / 文件列表 ──────────────────────
+
+    /// <summary>
+    /// 从 CF_HDROP 句柄取文件路径。作用：把剪贴板里的文件列表读成字符串。
+    /// 注意事项：① 传 <c>iFile = 0xFFFFFFFF</c> 时返回条数，此时 <c>lpszFile</c> 必须为 null；
+    /// ② 传索引时返回该路径的长度（字符数，不含结尾 NUL），据此分配缓冲区；
+    /// ③ 必须在剪贴板打开期间调用（句柄随关锁失效）。
+    /// </summary>
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    internal static extern uint DragQueryFileW(IntPtr hDrop, uint iFile, [Out] char[]? lpszFile, uint cch);
 
     /// <summary>注入输入事件。作用：发送 Ctrl+V 完成粘贴。注意事项：UIPI 会阻止向更高完整性级别（以管理员运行）的窗口注入，返回的事件数会少于请求数，必须自行判断并兜底。</summary>
     [DllImport("user32.dll", SetLastError = true)]

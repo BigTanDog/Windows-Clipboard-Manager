@@ -1,3 +1,4 @@
+using System.IO;
 using ClipboardManager.Core.Models;
 using ClipboardManager.Core.Text;
 using ClipboardManager.Storage;
@@ -80,7 +81,7 @@ public sealed class SqliteHistoryRepositoryTests : IDisposable
 
         var removed = _repository.EnforceMaxItems(2);
 
-        Assert.Equal(3, removed);
+        Assert.Equal(3, removed.RemovedCount);
         Assert.Equal(2, _repository.CountAll());
         var remaining = _repository.GetRecent(10);
         Assert.Equal("item-4", remaining[0].Preview);
@@ -91,7 +92,7 @@ public sealed class SqliteHistoryRepositoryTests : IDisposable
     public void 条数上限为不限制时不淘汰()
     {
         _repository.Upsert(Candidate("a"), ContentHasher.ForText("a"), "a");
-        Assert.Equal(0, _repository.EnforceMaxItems(-1));
+        Assert.Equal(0, _repository.EnforceMaxItems(-1).RemovedCount);
         Assert.Equal(1, _repository.CountAll());
     }
 
@@ -110,7 +111,7 @@ public sealed class SqliteHistoryRepositoryTests : IDisposable
         var removed = _repository.EnforceMaxItems(1);
         var remaining = _repository.GetRecent(10);
 
-        Assert.Equal(1, removed);
+        Assert.Equal(1, removed.RemovedCount);
         Assert.Equal(2, _repository.CountAll());
         Assert.Contains(remaining, item => item.IsPinned && item.Preview == "p-0");
         Assert.Contains(remaining, item => !item.IsPinned && item.Preview == "p-2");

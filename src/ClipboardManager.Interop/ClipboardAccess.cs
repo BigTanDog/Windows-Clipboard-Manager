@@ -1,9 +1,12 @@
 using System.Runtime.InteropServices;
+using ClipboardManager.Core.Clipboard;
+using ClipboardManager.Core.Html;
+using ClipboardManager.Core.Models;
 
 namespace ClipboardManager.Interop;
 
 /// <summary>
-/// 剪贴板的唯一读写入口（阶段一：只处理 <c>CF_UNICODETEXT</c>）。
+/// 剪贴板读写的唯一入口（阶段二起支持文本 / 图片 / 富文本 / 文件列表四种格式）。
 /// <para>
 /// 三条铁律（需求 §5.2 / §5.3，AGENTS.md §3）：
 /// ① 打开失败（ERROR_ACCESS_DENIED）要重试，但总耗时设上限，不能长时间阻塞；
@@ -13,11 +16,17 @@ namespace ClipboardManager.Interop;
 /// </summary>
 public sealed class ClipboardAccess
 {
-    /// <summary>文本长度上限（字符）。512K 字符 ≈ 1MB（UTF-16），超出截断（需求 §4.3 输入上限）。</summary>
+    /// <summary>文本长度上限（字符）。512K 字符 ≈ 1MB（UTF-16），超出截断。</summary>
     public const int MaxTextChars = 512 * 1024;
+
+    /// <summary>二进制格式（图片 / HTML）字节上限 32MB，超过直接拒绝记录。</summary>
+    public const int MaxBinaryBytes = 32 * 1024 * 1024;
 
     private const int MaxAttempts = 4;
     private const int RetryDelayMs = 40;
+
+    private static readonly Lazy<uint> HtmlFormatId =
+        new(() => NativeMethods.RegisterClipboardFormatW("HTML Format"));
 
     private readonly IntPtr _ownerWindow;
 
@@ -25,12 +34,17 @@ public sealed class ClipboardAccess
     /// <param name="ownerWindow">打开剪贴板时登记的所有者窗口（仅消息窗口句柄）。</param>
     public ClipboardAccess(IntPtr ownerWindow) => _ownerWindow = ownerWindow;
 
-    /// <summary>读取剪贴板文本。返回 false 且 <paramref name="error"/> 为 null 表示「当前没有文本内容」，属正常情况。</summary>
-    /// <param name="text">读到的文本（已拷贝到托管内存）。</param>
-    /// <param name="error">失败原因（含重试耗尽）。</param>
-    public bool TryReadText(out string? text, out string? error)
+    /// <summary><c>"HTML Format"</c> 的注册格式 ID（进程内惰性注册并缓存）。</summary>
+    public static uint HtmlFormat => HtmlFormatId.Value;
+
+    /// <summary>
+    /// 按需求 §3.2 的优先级读取剪贴板：文件路径 → 图片 → 富文本 → 纯文本，
+    /// 一次开锁内完成探测与拷贝。返回 false 且 <paramref name="error"/> 为 null 表示
+    /// 「当前没有受支持的内容」，属正常情况。
+    /// </summary>
+    public bool TryReadPayload(out ClipCandidate? payload, out string? error)
     {
-        text = null;
+        payload = null;
         error = null;
 
         for (var attempt = 1; attempt <= MaxAttempts; attempt++)
@@ -44,48 +58,83 @@ public sealed class ClipboardAccess
                     continue;
                 }
 
-                if (code == NativeMethods.ERROR_ACCESS_DENIED)
-                {
-                    error = $"剪贴板被其它程序占用（已重试 {MaxAttempts} 次）";
-                    return false;
-                }
-
-                error = $"打开剪贴板失败，Win32 错误码 {code}";
+                error = code == NativeMethods.ERROR_ACCESS_DENIED
+                    ? $"剪贴板被其它程序占用（已重试 {MaxAttempts} 次）"
+                    : $"打开剪贴板失败，Win32 错误码 {code}";
                 return false;
             }
 
-            // 从这里到 CloseClipboard 之间只允许「拷贝」操作。
+            // 锁内只允许拷贝到托管内存。
             try
             {
-                if (!NativeMethods.IsClipboardFormatAvailable(NativeMethods.CF_UNICODETEXT))
+                var capturedAt = DateTimeOffset.Now;
+
+                if (NativeMethods.IsClipboardFormatAvailable(NativeMethods.CF_HDROP))
                 {
-                    return false; // 没有文本格式：正常情况（图片 / 文件等阶段二再处理）
+                    var paths = ReadFilePathsInLock();
+                    if (paths.Count > 0)
+                    {
+                        payload = new ClipCandidate
+                        {
+                            Type = ClipContentType.FileList,
+                            FilePaths = paths,
+                            CapturedAt = capturedAt,
+                        };
+                        return true;
+                    }
                 }
 
-                var handle = NativeMethods.GetClipboardData(NativeMethods.CF_UNICODETEXT);
-                if (handle == IntPtr.Zero)
+                var dibFormat = NativeMethods.IsClipboardFormatAvailable(NativeMethods.CF_DIBV5)
+                    ? NativeMethods.CF_DIBV5
+                    : NativeMethods.CF_DIB;
+                if (NativeMethods.IsClipboardFormatAvailable(dibFormat))
                 {
-                    error = $"读取剪贴板文本失败，Win32 错误码 {Marshal.GetLastWin32Error()}";
-                    return false;
+                    var dib = ReadBinaryInLock(dibFormat);
+                    if (dib is not null)
+                    {
+                        payload = new ClipCandidate
+                        {
+                            Type = ClipContentType.Image,
+                            Binary = dib,
+                            BlobExtension = "png",
+                            CapturedAt = capturedAt,
+                        };
+                        return true;
+                    }
                 }
 
-                var pointer = NativeMethods.GlobalLock(handle);
-                if (pointer == IntPtr.Zero)
+                if (NativeMethods.IsClipboardFormatAvailable(HtmlFormat))
                 {
-                    error = $"锁定剪贴板内存失败，Win32 错误码 {Marshal.GetLastWin32Error()}";
-                    return false;
+                    var html = ReadBinaryInLock(HtmlFormat);
+                    if (html is not null)
+                    {
+                        payload = new ClipCandidate
+                        {
+                            Type = ClipContentType.Html,
+                            Binary = html,
+                            BlobExtension = "html",
+                            CapturedAt = capturedAt,
+                        };
+                        return true;
+                    }
                 }
 
-                try
+                if (NativeMethods.IsClipboardFormatAvailable(NativeMethods.CF_UNICODETEXT))
                 {
-                    var byteSize = NativeMethods.GlobalSize(handle);
-                    text = ReadUnicodeString(pointer, byteSize);
-                    return true;
+                    var text = ReadUnicodeTextInLock();
+                    if (text is not null)
+                    {
+                        payload = new ClipCandidate
+                        {
+                            Type = ClipContentType.Text,
+                            Text = text,
+                            CapturedAt = capturedAt,
+                        };
+                        return true;
+                    }
                 }
-                finally
-                {
-                    NativeMethods.GlobalUnlock(handle);
-                }
+
+                return false; // 没有受支持的格式
             }
             finally
             {
@@ -98,55 +147,59 @@ public sealed class ClipboardAccess
     }
 
     /// <summary>
-    /// 写入剪贴板文本。
+    /// 写回剪贴板（可同时写多种格式，D-08 要求 HTML 记录附带纯文本降级）。
     /// </summary>
-    /// <param name="value">要写入的文本（必须是原文，脱敏只用于显示）。</param>
-    /// <param name="sequenceAfterWrite">写入完成后的剪贴板序列号，供自循环过滤使用。</param>
+    /// <param name="request">写入请求。</param>
+    /// <param name="sequenceAfterWrite">写入后的剪贴板序列号，供自循环过滤使用。</param>
     /// <param name="error">失败原因。</param>
-    public bool TryWriteText(string value, out long sequenceAfterWrite, out string? error)
+    public bool TryWrite(ClipboardWriteRequest request, out long sequenceAfterWrite, out string? error)
     {
-        ArgumentNullException.ThrowIfNull(value);
+        ArgumentNullException.ThrowIfNull(request);
         sequenceAfterWrite = 0;
         error = null;
 
-        var bytes = ((long)value.Length + 1) * 2;
-        if (bytes > int.MaxValue)
+        if (!request.HasAnyFormat)
         {
-            error = "文本过长，拒绝写入剪贴板";
+            error = "写入请求不包含任何格式";
             return false;
         }
 
+        // 第一步（锁外）：把所有格式的内存块都准备好。编码与拷贝都不占用全局剪贴板锁。
+        var blocks = new List<(uint Format, IntPtr Handle)>(4);
+        try
+        {
+            if (!string.IsNullOrEmpty(request.Text))
+            {
+                blocks.Add((NativeMethods.CF_UNICODETEXT, AllocateUnicodeText(request.Text)));
+            }
+
+            if (!string.IsNullOrEmpty(request.Html))
+            {
+                blocks.Add((HtmlFormat, Allocate(HtmlClipboardWriter.Build(request.Html))));
+            }
+
+            if (request.DibV5 is { Length: > 0 } dib)
+            {
+                blocks.Add((NativeMethods.CF_DIBV5, Allocate(dib)));
+            }
+
+            if (request.FilePaths is { Count: > 0 } paths)
+            {
+                blocks.Add((NativeMethods.CF_HDROP, Allocate(DropFilesWriter.Build(paths))));
+            }
+        }
+        catch (Exception ex)
+        {
+            FreeAll(blocks);
+            error = $"准备剪贴板数据失败：{ex.Message}";
+            return false;
+        }
+
+        // 第二步：开锁后只是把已备好的内存交给系统，锁内不做任何耗时操作。
         for (var attempt = 1; attempt <= MaxAttempts; attempt++)
         {
-            var hMem = NativeMethods.GlobalAlloc(NativeMethods.GMEM_MOVEABLE, (nuint)bytes);
-            if (hMem == IntPtr.Zero)
-            {
-                error = $"分配剪贴板内存失败，Win32 错误码 {Marshal.GetLastWin32Error()}";
-                return false;
-            }
-
-            var pointer = NativeMethods.GlobalLock(hMem);
-            if (pointer == IntPtr.Zero)
-            {
-                NativeMethods.GlobalFree(hMem);
-                error = $"锁定剪贴板内存失败，Win32 错误码 {Marshal.GetLastWin32Error()}";
-                return false;
-            }
-
-            try
-            {
-                var chars = value.ToCharArray();
-                Marshal.Copy(chars, 0, pointer, chars.Length);
-                Marshal.WriteInt16(pointer, chars.Length * 2, 0); // 结尾 NUL
-            }
-            finally
-            {
-                NativeMethods.GlobalUnlock(hMem);
-            }
-
             if (!NativeMethods.OpenClipboard(_ownerWindow))
             {
-                NativeMethods.GlobalFree(hMem); // 未交给系统，必须自行释放
                 var code = Marshal.GetLastWin32Error();
                 if (code == NativeMethods.ERROR_ACCESS_DENIED && attempt < MaxAttempts)
                 {
@@ -154,36 +207,50 @@ public sealed class ClipboardAccess
                     continue;
                 }
 
+                FreeAll(blocks);
                 error = $"打开剪贴板失败，Win32 错误码 {code}";
                 return false;
             }
 
+            var transferred = new List<IntPtr>(blocks.Count);
             try
             {
                 if (!NativeMethods.EmptyClipboard())
                 {
-                    NativeMethods.GlobalFree(hMem);
                     error = $"清空剪贴板失败，Win32 错误码 {Marshal.GetLastWin32Error()}";
                     return false;
                 }
 
-                if (NativeMethods.SetClipboardData(NativeMethods.CF_UNICODETEXT, hMem) == IntPtr.Zero)
+                foreach (var (format, handle) in blocks)
                 {
-                    NativeMethods.GlobalFree(hMem); // 失败：所有权仍在自己
-                    error = $"写入剪贴板失败，Win32 错误码 {Marshal.GetLastWin32Error()}";
-                    return false;
+                    if (NativeMethods.SetClipboardData(format, handle) == IntPtr.Zero)
+                    {
+                        error = $"写入剪贴板失败（格式 {format}），Win32 错误码 {Marshal.GetLastWin32Error()}";
+                        return false;
+                    }
+
+                    // 成功：内存所有权移交系统，之后绝不能再释放。
+                    transferred.Add(handle);
                 }
 
-                // 成功：内存所有权已移交系统，之后绝不能再释放 hMem。
                 sequenceAfterWrite = NativeMethods.GetClipboardSequenceNumber();
                 return true;
             }
             finally
             {
+                foreach (var (_, handle) in blocks)
+                {
+                    if (!transferred.Contains(handle))
+                    {
+                        NativeMethods.GlobalFree(handle);
+                    }
+                }
+
                 NativeMethods.CloseClipboard();
             }
         }
 
+        FreeAll(blocks);
         error = "写入剪贴板失败";
         return false;
     }
@@ -230,26 +297,183 @@ public sealed class ClipboardAccess
     }
 
     /// <summary>
-    /// 在长度上限内把非托管的 UTF-16 字符串拷到托管内存：
-    /// 先按 <c>GlobalSize/2</c> 与 <see cref="MaxTextChars"/> 取最小值划定可读范围，
-    /// 再在该范围内找 NUL 结尾。<b>绝不直接使用会无限读取的 API</b>（畸形剪贴板数据防越界）。
+    /// 锁内读取文本：先按 <c>GlobalSize/2</c> 与 <see cref="MaxTextChars"/> 取最小值划定可读范围，
+    /// 再在该范围内找 NUL 结尾，<b>绝不调用会无限读取的 API</b>。
     /// </summary>
-    private static unsafe string ReadUnicodeString(IntPtr pointer, nuint byteSize)
+    private static unsafe string? ReadUnicodeTextInLock()
     {
-        var maxChars = (int)Math.Min((ulong)byteSize / 2UL, (ulong)MaxTextChars);
-        if (maxChars <= 0)
+        var handle = NativeMethods.GetClipboardData(NativeMethods.CF_UNICODETEXT);
+        if (handle == IntPtr.Zero)
         {
-            return string.Empty;
+            return null;
         }
 
-        var span = new ReadOnlySpan<char>((void*)pointer, maxChars);
-        var nul = span.IndexOf('\0');
-        var length = nul >= 0 ? nul : span.Length;
-        if (length > MaxTextChars)
+        var pointer = NativeMethods.GlobalLock(handle);
+        if (pointer == IntPtr.Zero)
         {
-            length = MaxTextChars;
+            return null;
         }
 
-        return new string(span[..length]);
+        try
+        {
+            var byteSize = NativeMethods.GlobalSize(handle);
+            var maxChars = (int)Math.Min((ulong)byteSize / 2UL, (ulong)MaxTextChars);
+            if (maxChars <= 0)
+            {
+                return string.Empty;
+            }
+
+            var span = new ReadOnlySpan<char>((void*)pointer, maxChars);
+            var nul = span.IndexOf('\0');
+            var length = nul >= 0 ? nul : span.Length;
+            return new string(span[..Math.Min(length, MaxTextChars)]);
+        }
+        finally
+        {
+            NativeMethods.GlobalUnlock(handle);
+        }
+    }
+
+    /// <summary>锁内读取任意二进制格式：按 <see cref="MaxBinaryBytes"/> 设上限，超出返回 null。</summary>
+    private static byte[]? ReadBinaryInLock(uint format)
+    {
+        var handle = NativeMethods.GetClipboardData(format);
+        if (handle == IntPtr.Zero)
+        {
+            return null;
+        }
+
+        var size = NativeMethods.GlobalSize(handle);
+        if (size == 0 || size > (nuint)MaxBinaryBytes)
+        {
+            return null;
+        }
+
+        var pointer = NativeMethods.GlobalLock(handle);
+        if (pointer == IntPtr.Zero)
+        {
+            return null;
+        }
+
+        try
+        {
+            var buffer = new byte[(int)size];
+            Marshal.Copy(pointer, buffer, 0, buffer.Length);
+            return buffer;
+        }
+        finally
+        {
+            NativeMethods.GlobalUnlock(handle);
+        }
+    }
+
+    /// <summary>锁内读取 CF_HDROP 路径列表（原样返回，校验交给 <c>PathValidator</c>）。</summary>
+    private static unsafe List<string> ReadFilePathsInLock()
+    {
+        var result = new List<string>();
+        var drop = NativeMethods.GetClipboardData(NativeMethods.CF_HDROP);
+        if (drop == IntPtr.Zero)
+        {
+            return result;
+        }
+
+        var count = NativeMethods.DragQueryFileW(drop, NativeMethods.DragQueryFileCount, null, 0);
+        if (count == 0 || count > PathValidator.MaxPaths * 4)
+        {
+            // 条数异常（含畸形数据）直接放弃，避免为恶意数据分配大量内存。
+            return result;
+        }
+
+        for (uint index = 0; index < count && result.Count < PathValidator.MaxPaths * 4; index++)
+        {
+            var length = NativeMethods.DragQueryFileW(drop, index, null, 0);
+            if (length == 0 || length > PathValidator.MaxPathLength)
+            {
+                continue;
+            }
+
+            var buffer = new char[length + 1];
+            var written = NativeMethods.DragQueryFileW(drop, index, buffer, (uint)buffer.Length);
+            if (written > 0)
+            {
+                result.Add(new string(buffer, 0, (int)written));
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>分配 HGLOBAL 并拷贝字节（不占用剪贴板锁）。</summary>
+    private static IntPtr Allocate(byte[] data)
+    {
+        var handle = NativeMethods.GlobalAlloc(NativeMethods.GMEM_MOVEABLE, (nuint)data.Length);
+        if (handle == IntPtr.Zero)
+        {
+            throw new InvalidOperationException($"分配剪贴板内存失败（{data.Length} 字节）");
+        }
+
+        var pointer = NativeMethods.GlobalLock(handle);
+        if (pointer == IntPtr.Zero)
+        {
+            NativeMethods.GlobalFree(handle);
+            throw new InvalidOperationException("锁定剪贴板内存失败");
+        }
+
+        try
+        {
+            Marshal.Copy(data, 0, pointer, data.Length);
+        }
+        finally
+        {
+            NativeMethods.GlobalUnlock(handle);
+        }
+
+        return handle;
+    }
+
+    /// <summary>分配 HGLOBAL 并写入 UTF-16 字符串（含结尾 NUL）。</summary>
+    private static IntPtr AllocateUnicodeText(string value)
+    {
+        var chars = value.ToCharArray();
+        var byteCount = ((long)chars.Length + 1) * 2;
+        if (byteCount > int.MaxValue)
+        {
+            throw new InvalidOperationException("文本过长，无法写入剪贴板");
+        }
+
+        var handle = NativeMethods.GlobalAlloc(NativeMethods.GMEM_MOVEABLE, (nuint)byteCount);
+        if (handle == IntPtr.Zero)
+        {
+            throw new InvalidOperationException($"分配剪贴板内存失败（{byteCount} 字节）");
+        }
+
+        var pointer = NativeMethods.GlobalLock(handle);
+        if (pointer == IntPtr.Zero)
+        {
+            NativeMethods.GlobalFree(handle);
+            throw new InvalidOperationException("锁定剪贴板内存失败");
+        }
+
+        try
+        {
+            Marshal.Copy(chars, 0, pointer, chars.Length);
+            Marshal.WriteInt16(pointer, chars.Length * 2, 0);
+        }
+        finally
+        {
+            NativeMethods.GlobalUnlock(handle);
+        }
+
+        return handle;
+    }
+
+    private static void FreeAll(List<(uint Format, IntPtr Handle)> blocks)
+    {
+        foreach (var (_, handle) in blocks)
+        {
+            NativeMethods.GlobalFree(handle);
+        }
+
+        blocks.Clear();
     }
 }

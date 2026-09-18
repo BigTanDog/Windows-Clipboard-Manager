@@ -52,6 +52,30 @@ public static class PreviewBuilder
             : preview;
     }
 
+    /// <summary>图片摘要：尺寸 + 体积（需求 §3.4 列表项显示内容摘要）。</summary>
+    public static string ForImage(int width, int height, long sizeBytes)
+    {
+        var bytes = Math.Max(sizeBytes, 0);
+        var size = bytes switch
+        {
+            < 1024 => $"{bytes} B",
+            < 1024 * 1024 => $"{bytes / 1024.0:0.#} KB",
+            _ => $"{bytes / (1024.0 * 1024.0):0.#} MB",
+        };
+
+        return $"{width}×{height} · {size}";
+    }
+
+    /// <summary>内容类型标签（面板列表左侧的类型徽标文字，替代图标）。</summary>
+    public static string TypeLabel(Models.ClipContentType type) => type switch
+    {
+        Models.ClipContentType.Text => "文本",
+        Models.ClipContentType.Html => "HTML",
+        Models.ClipContentType.Image => "图片",
+        Models.ClipContentType.FileList => "文件",
+        _ => "未知",
+    };
+
     /// <summary>文件列表摘要：显示文件名（不显示完整路径中的用户目录），保留顺序。</summary>
     public static string ForFileList(IReadOnlyList<string> paths)
     {

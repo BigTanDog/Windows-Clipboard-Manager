@@ -9,6 +9,11 @@ namespace ClipboardManager.Storage;
 /// <param name="UpdatedAt">刷新后的时间戳。</param>
 public readonly record struct UpsertOutcome(long Id, bool IsNew, DateTimeOffset UpdatedAt);
 
+/// <summary>淘汰结果。</summary>
+/// <param name="RemovedCount">被删除的记录数。</param>
+/// <param name="BlobPaths">被删除记录的本体文件相对路径（调用方负责删文件）。</param>
+public readonly record struct EvictionResult(int RemovedCount, IReadOnlyList<string> BlobPaths);
+
 /// <summary>
 /// 历史记录仓储（SQLite；需求 §4.2 / §4.3）。
 /// <para>
@@ -86,7 +91,14 @@ public sealed class SqliteHistoryRepository : IDisposable
     /// <param name="candidate">剪贴板候选（已拷贝到托管内存的纯数据）。</param>
     /// <param name="contentHash">内容哈希。</param>
     /// <param name="preview">原文摘要（显示时再脱敏）。</param>
-    public UpsertOutcome Upsert(ClipCandidate candidate, string contentHash, string preview)
+    /// <param name="blobPath">本体文件相对路径（图片 / HTML 有值）。</param>
+    /// <param name="sizeBytes">入库体积（默认取候选体积；有本体时传本体字节数，供磁盘上限淘汰使用）。</param>
+    public UpsertOutcome Upsert(
+        ClipCandidate candidate,
+        string contentHash,
+        string preview,
+        string? blobPath = null,
+        long? sizeBytes = null)
     {
         ArgumentNullException.ThrowIfNull(candidate);
         ArgumentException.ThrowIfNullOrEmpty(contentHash);
@@ -128,11 +140,11 @@ public sealed class SqliteHistoryRepository : IDisposable
                 """;
             insert.Parameters.AddWithValue("$type", (int)candidate.Type);
             insert.Parameters.AddWithValue("$text", (object?)candidate.Text ?? DBNull.Value);
-            insert.Parameters.AddWithValue("$blob", (object?)candidate.BlobExtension ?? DBNull.Value);
+            insert.Parameters.AddWithValue("$blob", (object?)blobPath ?? DBNull.Value);
             insert.Parameters.AddWithValue("$paths", string.Join('\n', candidate.FilePaths));
             insert.Parameters.AddWithValue("$preview", preview);
             insert.Parameters.AddWithValue("$hash", contentHash);
-            insert.Parameters.AddWithValue("$size", candidate.SizeBytes);
+            insert.Parameters.AddWithValue("$size", sizeBytes ?? candidate.SizeBytes);
             insert.Parameters.AddWithValue("$app", (object?)candidate.SourceApp ?? DBNull.Value);
             insert.Parameters.AddWithValue("$created", now);
             insert.Parameters.AddWithValue("$updated", now);
@@ -223,32 +235,76 @@ public sealed class SqliteHistoryRepository : IDisposable
 
     /// <summary>
     /// 按条数上限淘汰（需求 §3.3 / 技术设计 §4.5）：只淘汰非收藏项，保留最近 <paramref name="maxItems"/> 条非收藏记录。
+    /// 返回被淘汰记录的本体路径，供调用方删除文件（避免堆积孤儿文件）。
     /// </summary>
     /// <param name="maxItems">条数上限；-1 表示不限制。</param>
-    /// <returns>被删除的条数。</returns>
-    public int EnforceMaxItems(int maxItems)
+    public EvictionResult EnforceMaxItems(int maxItems)
     {
         if (maxItems < 0)
         {
-            return 0;
+            return new EvictionResult(0, []);
         }
 
         lock (_gate)
         {
             var connection = EnsureConnection();
-            using var command = connection.CreateCommand();
-            command.CommandText = """
-                DELETE FROM clip_items
-                WHERE is_pinned = 0
-                  AND id IN (
-                    SELECT id FROM clip_items
+            using var transaction = connection.BeginTransaction();
+
+            var blobPaths = new List<string>();
+            var doomed = 0;
+
+            using (var select = connection.CreateCommand())
+            {
+                select.Transaction = transaction;
+                select.CommandText = """
+                    SELECT id, blob_path FROM clip_items
                     WHERE is_pinned = 0
-                    ORDER BY updated_at DESC, id DESC
-                    LIMIT -1 OFFSET $maxItems
-                  );
-                """;
-            command.Parameters.AddWithValue("$maxItems", maxItems);
-            return command.ExecuteNonQuery();
+                      AND id IN (
+                        SELECT id FROM clip_items
+                        WHERE is_pinned = 0
+                        ORDER BY updated_at DESC, id DESC
+                        LIMIT -1 OFFSET $maxItems
+                      );
+                    """;
+                select.Parameters.AddWithValue("$maxItems", maxItems);
+
+                using var reader = select.ExecuteReader();
+                while (reader.Read())
+                {
+                    doomed++;
+                    if (!reader.IsDBNull(1))
+                    {
+                        blobPaths.Add(reader.GetString(1));
+                    }
+                }
+            }
+
+            if (doomed == 0)
+            {
+                transaction.Commit();
+                return new EvictionResult(0, []);
+            }
+
+            // 删除条件与上面 SELECT 完全一致（同一条子查询），不做动态 SQL 拼接。
+            using (var delete = connection.CreateCommand())
+            {
+                delete.Transaction = transaction;
+                delete.CommandText = """
+                    DELETE FROM clip_items
+                    WHERE is_pinned = 0
+                      AND id IN (
+                        SELECT id FROM clip_items
+                        WHERE is_pinned = 0
+                        ORDER BY updated_at DESC, id DESC
+                        LIMIT -1 OFFSET $maxItems
+                      );
+                    """;
+                delete.Parameters.AddWithValue("$maxItems", maxItems);
+                delete.ExecuteNonQuery();
+            }
+
+            transaction.Commit();
+            return new EvictionResult(doomed, blobPaths);
         }
     }
 
@@ -267,6 +323,98 @@ public sealed class SqliteHistoryRepository : IDisposable
             _connection = null;
         }
     }
+
+    /// <summary>
+    /// 搜索（需求 §3.3 / 技术设计 §7.3）：对文本内容、文件路径、摘要做 <c>LIKE</c> 模糊匹配。
+    /// 参数化 + 转义 <c>% _ \</c>，避免用户输入被当成通配符（也避免通配注入）。
+    /// </summary>
+    /// <param name="query">查询词；空查询退化为「最近记录」。</param>
+    /// <param name="limit">最多返回条数。</param>
+    public IReadOnlyList<ClipItem> Search(string? query, int limit)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            return GetRecent(limit);
+        }
+
+        lock (_gate)
+        {
+            var connection = EnsureConnection();
+            using var command = connection.CreateCommand();
+            command.CommandText = """
+                SELECT id, type, text_content, blob_path, file_paths, preview, content_hash,
+                       size_bytes, is_pinned, source_app, created_at, updated_at
+                FROM clip_items
+                WHERE text_content LIKE $pattern ESCAPE '\'
+                   OR file_paths   LIKE $pattern ESCAPE '\'
+                   OR preview      LIKE $pattern ESCAPE '\'
+                ORDER BY updated_at DESC, id DESC
+                LIMIT $limit;
+                """;
+            command.Parameters.AddWithValue("$pattern", "%" + EscapeLike(query.Trim()) + "%");
+            command.Parameters.AddWithValue("$limit", Math.Max(limit, 0));
+
+            var items = new List<ClipItem>();
+            using var reader = command.ExecuteReader();
+            while (reader.Read())
+            {
+                items.Add(Map(reader));
+            }
+
+            return items;
+        }
+    }
+
+    /// <summary>按主键取单条记录（删除前读取用）。</summary>
+    /// <param name="id">记录主键。</param>
+    public ClipItem? GetById(long id)
+    {
+        lock (_gate)
+        {
+            var connection = EnsureConnection();
+            using var command = connection.CreateCommand();
+            command.CommandText = """
+                SELECT id, type, text_content, blob_path, file_paths, preview, content_hash,
+                       size_bytes, is_pinned, source_app, created_at, updated_at
+                FROM clip_items
+                WHERE id = $id
+                LIMIT 1;
+                """;
+            command.Parameters.AddWithValue("$id", id);
+
+            using var reader = command.ExecuteReader();
+            return reader.Read() ? Map(reader) : null;
+        }
+    }
+
+    /// <summary>取所有仍被引用的本体路径（供启动时清理孤儿文件）。</summary>
+    public IReadOnlyList<string> GetReferencedBlobPaths()
+    {
+        lock (_gate)
+        {
+            var connection = EnsureConnection();
+            using var command = connection.CreateCommand();
+            command.CommandText = "SELECT blob_path FROM clip_items WHERE blob_path IS NOT NULL;";
+
+            var paths = new List<string>();
+            using var reader = command.ExecuteReader();
+            while (reader.Read())
+            {
+                if (!reader.IsDBNull(0))
+                {
+                    paths.Add(reader.GetString(0));
+                }
+            }
+
+            return paths;
+        }
+    }
+
+    /// <summary>转义 LIKE 元字符（配合 <c>ESCAPE '\'</c> 使用）。</summary>
+    private static string EscapeLike(string value) => value
+        .Replace("\\", "\\\\", StringComparison.Ordinal)
+        .Replace("%", "\\%", StringComparison.Ordinal)
+        .Replace("_", "\\_", StringComparison.Ordinal);
 
     private SqliteConnection EnsureConnection()
     {

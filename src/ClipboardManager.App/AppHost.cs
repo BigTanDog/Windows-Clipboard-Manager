@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.IO;
 using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Threading;
@@ -8,7 +9,6 @@ using ClipboardManager.Core.Hotkeys;
 using ClipboardManager.Core.Models;
 using ClipboardManager.Core.Sensitive;
 using ClipboardManager.Core.Settings;
-using ClipboardManager.Core.Text;
 using ClipboardManager.Core.Ui;
 using ClipboardManager.Interop;
 using ClipboardManager.Storage;
@@ -16,15 +16,16 @@ using ClipboardManager.Storage;
 namespace ClipboardManager.App;
 
 /// <summary>
-/// 应用宿主：把消息窗口、剪贴板访问、存储与面板串起来（阶段一最小闭环）。
+/// 应用宿主：把消息窗口、剪贴板访问、存储与面板串起来。
 /// <para>
 /// 线程模型（AGENTS.md §3）：本类构造与 <see cref="Start"/> 运行在 WPF UI 线程（STA），
-/// <b>所有剪贴板读写都发生在这条线程上</b>；哈希、写库、读库交给后台任务，只传纯托管数据。
+/// <b>所有剪贴板读写都发生在这条线程上</b>；解析、哈希、编码、写库交给后台任务，
+/// 只传纯托管数据。
 /// </para>
 /// </summary>
 internal sealed class AppHost : IDisposable
 {
-    /// <summary>面板最多展示的记录数（即使设置为「不限制」，界面也只取这么多）。</summary>
+    /// <summary>面板最多展示的记录数。</summary>
     private const int MaxDisplayItems = 500;
 
     private readonly bool _diag;
@@ -39,6 +40,8 @@ internal sealed class AppHost : IDisposable
     private SettingsStore? _settingsStore;
     private AppSettings _settings = AppSettings.Default;
     private SqliteHistoryRepository? _repository;
+    private BlobStore? _blobs;
+    private CaptureProcessor? _processor;
     private SensitiveMasker _masker = SensitiveMasker.Disabled;
     private MessageWindow? _messageWindow;
     private ClipboardAccess? _clipboard;
@@ -49,6 +52,7 @@ internal sealed class AppHost : IDisposable
     private DispatcherTimer? _panelWarmup;
     private IntPtr _previousForeground;
     private long _lastProcessedSequence = -1;
+    private string _query = string.Empty;
     private bool _disposed;
 
     /// <summary>创建宿主。</summary>
@@ -61,7 +65,7 @@ internal sealed class AppHost : IDisposable
         _interactive = !diag;
     }
 
-    /// <summary>启动：数据目录自检 → 设置 → 数据库 → 消息窗口与监听 → 热键 → 面板。</summary>
+    /// <summary>启动：数据目录自检 → 设置 → 数据库与本体目录 → 消息窗口与监听 → 热键 → READY → 预热。</summary>
     public void Start()
     {
         try
@@ -73,6 +77,34 @@ internal sealed class AppHost : IDisposable
             // 启动期故障必须留下完整证据（含堆栈）：发布版本没有行号，日志是唯一线索。
             _log.Error("启动失败", ex);
             throw;
+        }
+    }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+
+        // 退出顺序（技术设计 §2.2）：注销热键 → 注销监听 → 销毁消息窗口 → 释放数据库。
+        try
+        {
+            _hotkeys?.Dispose();
+            _messageWindow?.StopClipboardListening();
+            _messageWindow?.Dispose();
+            _repository?.Dispose();
+            _autoExitTimer?.Stop();
+            _panelWarmup?.Stop();
+            _backgroundGate.Dispose();
+            _log.Info($"退出 | 运行 {(int)_uptime.Elapsed.TotalSeconds} 秒");
+        }
+        catch (Exception ex)
+        {
+            _log.Error("退出清理时出错", ex);
         }
     }
 
@@ -92,13 +124,18 @@ internal sealed class AppHost : IDisposable
         _settings = _settingsStore.Load();
         _log.Diag(
             $"设置 | maxItems={_settings.MaxItems} diskQuotaMb={_settings.DiskQuotaMb} hotkey={_settings.Hotkey} "
-            + $"autoPaste={_settings.AutoPaste} maskSensitive={_settings.MaskSensitiveData}");
+            + $"autoPaste={_settings.AutoPaste} maskSensitive={_settings.MaskSensitiveData} captureImages={_settings.CaptureImages}");
 
         _repository = new SqliteHistoryRepository(AppPaths.DatabasePath);
         _repository.Initialize();
+        _blobs = new BlobStore(AppPaths.DataDirectory, _log);
+        _processor = new CaptureProcessor(_blobs, _log, _settings.CaptureImages);
         _log.Diag($"数据库就绪 | 现有 {_repository.CountAll()} 条");
 
         _masker = _settings.MaskSensitiveData ? new SensitiveMasker(true) : SensitiveMasker.Disabled;
+
+        // 启动时清理孤儿本体文件（此时没有在途写入，安全）。
+        CleanOrphanBlobsAsync();
 
         _messageWindow = new MessageWindow();
         _messageWindow.Create();
@@ -106,7 +143,7 @@ internal sealed class AppHost : IDisposable
         _messageWindow.HotkeyPressed += TogglePanel;
 
         _clipboard = new ClipboardAccess(_messageWindow.Handle);
-        _paste = new PasteService(_clipboard, _selfWrite, _log);
+        _paste = new PasteService(_clipboard, _selfWrite, _blobs, _log);
 
         if (!_messageWindow.TryStartClipboardListening(out var listenError))
         {
@@ -122,7 +159,6 @@ internal sealed class AppHost : IDisposable
                 _log.Error(registerError ?? "注册热键失败");
                 if (_interactive)
                 {
-                    // 自动化验证（--diag）下不弹窗：弹窗会阻塞且无法被脚本关闭。
                     MessageBox.Show(
                         registerError ?? "注册热键失败",
                         "剪贴板管理器",
@@ -140,15 +176,11 @@ internal sealed class AppHost : IDisposable
             _log.Error($"热键配置无效：{parseError}");
         }
 
-        // 面板窗口<b>不在启动时创建</b>：实测常驻内存与冷启动都被 WPF 窗口/渲染栈拖高
-        // （见阶段一实测数据），改为首次弹出时懒创建；首次弹出仍有充足余量（实测 ~77ms < 100ms）。
-        // 列表在面板首次弹出时再读取。
-
         _log.Info($"READY elapsedMs={_uptime.Elapsed.TotalMilliseconds:F0}");
 
         // 预热：READY 之后再创建面板窗口。
-        // 实测依据：启动时创建窗口会让冷启动从 233ms 涨到 497ms，但不创建则首次弹出要多花 ~100ms
-        // （含窗口与渲染栈初始化）。折中方案是在空闲时预热 —— 两个指标同时达标。
+        // 实测依据：启动时创建窗口会让冷启动从 233ms 涨到 497ms，但不创建则首次弹出要多花 ~100ms。
+        // 折中方案是在空闲时预热 —— 两个指标同时达标。
         _panelWarmup = new DispatcherTimer(DispatcherPriority.ApplicationIdle)
         {
             Interval = TimeSpan.FromSeconds(1.5),
@@ -184,34 +216,6 @@ internal sealed class AppHost : IDisposable
         }
     }
 
-    /// <inheritdoc />
-    public void Dispose()
-    {
-        if (_disposed)
-        {
-            return;
-        }
-
-        _disposed = true;
-
-        // 退出顺序（技术设计 §2.2）：注销热键 → 注销监听 → 销毁消息窗口 → 释放数据库。
-        try
-        {
-            _hotkeys?.Dispose();
-            _messageWindow?.StopClipboardListening();
-            _messageWindow?.Dispose();
-            _repository?.Dispose();
-            _autoExitTimer?.Stop();
-            _panelWarmup?.Stop();
-            _backgroundGate.Dispose();
-            _log.Info($"退出 | 运行 {(int)_uptime.Elapsed.TotalSeconds} 秒");
-        }
-        catch (Exception ex)
-        {
-            _log.Error("退出清理时出错", ex);
-        }
-    }
-
     /// <summary>WM_CLIPBOARDUPDATE 处理（STA 线程）。</summary>
     private void OnClipboardUpdated()
     {
@@ -225,15 +229,21 @@ internal sealed class AppHost : IDisposable
 
             var sequence = ClipboardAccess.GetSequenceNumber();
 
-            // 同一次剪贴板变更系统会投递多条 WM_CLIPBOARDUPDATE（实测一次 SetClipboard 会来 3 条），
-            // 序列号相同即同一次变更，处理过一次就跳过，避免重复读取与重复写库。
+            // 同一次剪贴板变更系统会投递多条 WM_CLIPBOARDUPDATE（实测一次写入会来 3 条）。
             if (sequence == _lastProcessedSequence)
             {
                 _log.Diag("剪贴板更新：序列号未变化，跳过重复通知");
                 return;
             }
 
-            if (!clipboard.TryReadText(out var text, out var error))
+            // 自身写入（序列号判据）。
+            if (_selfWrite.ShouldIgnore(sequence, null, DateTimeOffset.Now))
+            {
+                _log.Diag("剪贴板更新：自身写入（序列号命中），跳过");
+                return;
+            }
+
+            if (!clipboard.TryReadPayload(out var payload, out var error))
             {
                 if (error is not null)
                 {
@@ -241,39 +251,25 @@ internal sealed class AppHost : IDisposable
                 }
                 else
                 {
-                    _log.Diag("剪贴板更新：无文本格式，忽略（阶段一只处理文本）");
+                    _log.Diag("剪贴板更新：没有受支持的格式，忽略");
                 }
 
                 return;
             }
 
-            if (string.IsNullOrEmpty(text))
+            if (payload is null)
             {
-                _log.Diag("剪贴板更新：内容为空，忽略");
                 return;
             }
 
             // 已成功读取本条变更的内容，记录序列号：后续同一序列号的通知直接跳过。
             _lastProcessedSequence = sequence;
 
-            var hash = ContentHasher.ForText(text);
-            if (_selfWrite.ShouldIgnore(sequence, hash, DateTimeOffset.Now))
-            {
-                _log.Diag("剪贴板更新：判定为自身写入，跳过（自循环防护）");
-                return;
-            }
-
             var sourceApp = _settings.ExcludeByProcessName ? ClipboardAccess.TryGetSourceProcessName() : null;
-            var candidate = new ClipCandidate
-            {
-                Type = ClipContentType.Text,
-                Text = text,
-                SourceApp = sourceApp,
-                CapturedAt = DateTimeOffset.Now,
-            };
+            payload = payload with { SourceApp = sourceApp };
 
-            _log.Diag($"捕获文本 | {text.Length} 字符 | 来源={sourceApp ?? "未知"}");
-            EnqueueStore(candidate, hash);
+            _log.Diag($"捕获 {payload.Type} | 体积≈{payload.SizeBytes} 字节 | 来源={sourceApp ?? "未知"}");
+            EnqueueCapture(payload, sequence);
         }
         catch (Exception ex)
         {
@@ -281,10 +277,9 @@ internal sealed class AppHost : IDisposable
         }
     }
 
-    /// <summary>入库 + 淘汰 + 刷新列表（全部在后台串行执行）。</summary>
-    private void EnqueueStore(ClipCandidate candidate, string contentHash)
+    /// <summary>后台串行处理：解析 → 哈希 → 编码 → 落本体 → 入库 → 淘汰 → 刷新列表。</summary>
+    private void EnqueueCapture(ClipCandidate candidate, long sequence)
     {
-        var preview = PreviewBuilder.ForText(candidate.Text);
         var maxItems = _settings.MaxItems;
 
         _ = Task.Run(async () =>
@@ -292,23 +287,48 @@ internal sealed class AppHost : IDisposable
             await _backgroundGate.WaitAsync().ConfigureAwait(false);
             try
             {
-                var outcome = _repository!.Upsert(candidate, contentHash, preview);
+                var processed = _processor!.Process(candidate);
+                if (processed is null)
+                {
+                    return;
+                }
+
+                // 哈希兜底判据（图片等类型的哈希要在解析后才算得出来）。
+                if (_selfWrite.ShouldIgnore(sequence, processed.ContentHash, DateTimeOffset.Now))
+                {
+                    _log.Diag("剪贴板更新：自身写入（哈希命中），跳过存储");
+                    return;
+                }
+
+                var outcome = _repository!.Upsert(
+                    processed.Candidate,
+                    processed.ContentHash,
+                    processed.Preview,
+                    processed.BlobPath,
+                    processed.SizeBytes);
+
                 if (maxItems >= 0)
                 {
-                    var removed = _repository.EnforceMaxItems(maxItems);
-                    if (removed > 0)
+                    var evicted = _repository.EnforceMaxItems(maxItems);
+                    if (evicted.RemovedCount > 0)
                     {
-                        _log.Diag($"条数上限淘汰 {removed} 条");
+                        _log.Diag($"条数上限淘汰 {evicted.RemovedCount} 条");
+                        foreach (var blobPath in evicted.BlobPaths)
+                        {
+                            DeleteBlobFiles(blobPath);
+                        }
                     }
                 }
 
-                _log.Diag($"入库 id={outcome.Id} 新增={outcome.IsNew}");
-                var items = _repository.GetRecent(DisplayLimit());
+                _log.Diag(
+                    $"入库 id={outcome.Id} 类型={processed.Candidate.Type} 新增={outcome.IsNew} 本体={processed.BlobPath ?? "无"}");
+
+                var items = QueryItems();
                 _ = _dispatcher.BeginInvoke(() => ApplyItems(items), DispatcherPriority.Background);
             }
             catch (Exception ex)
             {
-                _log.Error("写入历史失败", ex);
+                _log.Error("处理剪贴板内容失败", ex);
             }
             finally
             {
@@ -325,7 +345,7 @@ internal sealed class AppHost : IDisposable
             await _backgroundGate.WaitAsync().ConfigureAwait(false);
             try
             {
-                var items = _repository!.GetRecent(DisplayLimit());
+                var items = QueryItems();
                 _ = _dispatcher.BeginInvoke(() => ApplyItems(items), DispatcherPriority.Background);
             }
             catch (Exception ex)
@@ -339,6 +359,14 @@ internal sealed class AppHost : IDisposable
         });
     }
 
+    private IReadOnlyList<ClipItem> QueryItems()
+    {
+        var limit = DisplayLimit();
+        return string.IsNullOrEmpty(_query)
+            ? _repository!.GetRecent(limit)
+            : _repository!.Search(_query, limit);
+    }
+
     private void ApplyItems(IReadOnlyList<ClipItem> items)
     {
         if (_panel is null)
@@ -348,8 +376,20 @@ internal sealed class AppHost : IDisposable
         }
 
         var now = DateTimeOffset.Now;
-        _panel.SetItems([.. items.Select(item => new ClipItemViewModel(item, _masker, now))]);
+        _panel.SetItems(
+        [
+            .. items.Select(item => new ClipItemViewModel(item, _masker, now, _query, ThumbnailPath(item)))
+        ]);
     }
+
+    /// <summary>
+    /// 缩略图绝对路径：<b>只有图片记录</b>才有。
+    /// （HTML 记录也有本体文件，但它没有缩略图，若不加类型判断会让界面出现一个空的缩略图框。）
+    /// </summary>
+    private string? ThumbnailPath(ClipItem item) =>
+        item.Type != ClipContentType.Image || string.IsNullOrEmpty(item.BlobPath)
+            ? null
+            : Path.Combine(AppPaths.DataDirectory, BlobStore.ThumbnailPathFor(item.BlobPath)!);
 
     private int DisplayLimit() => _settings.MaxItems < 0
         ? MaxDisplayItems
@@ -379,6 +419,7 @@ internal sealed class AppHost : IDisposable
         panel.PasteRequested += OnPasteRequested;
         panel.DeleteRequested += OnDeleteRequested;
         panel.CloseRequested += HidePanel;
+        panel.SearchRequested += OnSearchRequested;
 
         // 立即创建 HWND：让 WS_EX_TOOLWINDOW 在显示前生效，并让首次 Show() 更快。
         _ = new WindowInteropHelper(panel).EnsureHandle();
@@ -396,6 +437,9 @@ internal sealed class AppHost : IDisposable
             return;
         }
 
+        // 每次弹出都重置搜索（产品计划 Q-2 的既定行为），并展示完整列表。
+        panel.ResetSearch();
+        _query = string.Empty;
         RefreshListAsync();
 
         var watch = Stopwatch.StartNew();
@@ -425,12 +469,19 @@ internal sealed class AppHost : IDisposable
         panel.Dispatcher.Invoke(static () => { }, DispatcherPriority.Render);
         watch.Stop();
 
-        _log.Info($"PANEL_SHOWN elapsedMs={watch.Elapsed.TotalMilliseconds:F1} dpi={dpi}");
+        _log.Info($"PANEL_SHOWN elapsedMs={watch.Elapsed.TotalMilliseconds:F1} dpi={dpi} firstShow={firstShow}");
     }
 
     private void HidePanel() => _panel?.Hide();
 
-    /// <summary>粘贴：写回剪贴板 → 隐藏面板 → 恢复前台窗口 → 注入 Ctrl+V。</summary>
+    private void OnSearchRequested(string query)
+    {
+        _query = query;
+        _log.Diag($"搜索：{(string.IsNullOrEmpty(query) ? "清空" : "执行")}");
+        RefreshListAsync();
+    }
+
+    /// <summary>粘贴：按类型写回剪贴板 → 隐藏面板 → 恢复前台窗口 → 注入 Ctrl+V。</summary>
     private async void OnPasteRequested(ClipItem item)
     {
         try
@@ -505,9 +556,16 @@ internal sealed class AppHost : IDisposable
             await _backgroundGate.WaitAsync().ConfigureAwait(false);
             try
             {
-                var removed = _repository!.Delete(item.Id);
+                // 先取记录（拿到本体路径），再删行，最后删文件 —— 顺序保证不会出现「文件没了但记录还在」。
+                var record = _repository!.GetById(item.Id);
+                var removed = _repository.Delete(item.Id);
+                if (removed && record is not null)
+                {
+                    DeleteBlobFiles(record.BlobPath);
+                }
+
                 _log.Diag($"删除记录 id={item.Id} 结果={removed}");
-                var items = _repository.GetRecent(DisplayLimit());
+                var items = QueryItems();
                 _ = _dispatcher.BeginInvoke(() => ApplyItems(items), DispatcherPriority.Background);
             }
             catch (Exception ex)
@@ -520,6 +578,28 @@ internal sealed class AppHost : IDisposable
             }
         });
     }
-}
 
-      
+    /// <summary>删除本体文件与缩略图（幂等）。</summary>
+    private void DeleteBlobFiles(string? blobPath)
+    {
+        _blobs?.TryDelete(blobPath);
+        _blobs?.TryDelete(BlobStore.ThumbnailPathFor(blobPath));
+    }
+
+    /// <summary>启动时清理孤儿本体文件（不阻塞 READY）。</summary>
+    private void CleanOrphanBlobsAsync()
+    {
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                var referenced = _repository!.GetReferencedBlobPaths();
+                _blobs!.CollectOrphans(referenced);
+            }
+            catch (Exception ex)
+            {
+                _log.Error("清理孤儿本体文件失败", ex);
+            }
+        });
+    }
+}

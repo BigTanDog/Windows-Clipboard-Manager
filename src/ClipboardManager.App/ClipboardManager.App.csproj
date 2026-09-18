@@ -18,4 +18,9 @@
     <ProjectReference Include="..\ClipboardManager.Storage\ClipboardManager.Storage.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- 图片编解码等内部类型需要被测试直接覆盖 -->
+    <InternalsVisibleTo Include="ClipboardManager.Tests" />
+  </ItemGroup>
+
 </Project>

@@ -99,6 +99,21 @@ public class PreviewBuilderTests
         Assert.Equal(string.Empty, PreviewBuilder.ForText("   "));
         Assert.Equal(string.Empty, PreviewBuilder.ForFileList([]));
     }
+
+    [Theory]
+    [InlineData(135, "8×8 · 135 B")]
+    [InlineData(2048, "8×8 · 2 KB")]
+    [InlineData(3 * 1024 * 1024, "8×8 · 3 MB")]
+    public void 图片摘要按体积选单位(long sizeBytes, string expected) =>
+        Assert.Equal(expected, PreviewBuilder.ForImage(8, 8, sizeBytes));
+
+    [Theory]
+    [InlineData(ClipContentType.Text, "文本")]
+    [InlineData(ClipContentType.Html, "HTML")]
+    [InlineData(ClipContentType.Image, "图片")]
+    [InlineData(ClipContentType.FileList, "文件")]
+    public void 类型标签(ClipContentType type, string expected) =>
+        Assert.Equal(expected, PreviewBuilder.TypeLabel(type));
 }
 
 public class RelativeTimeTests

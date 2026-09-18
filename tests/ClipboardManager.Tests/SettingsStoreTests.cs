@@ -1,3 +1,4 @@
+using System.IO;
 using ClipboardManager.Core.Settings;
 using ClipboardManager.Storage;
 

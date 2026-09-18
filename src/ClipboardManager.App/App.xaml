@@ -1,10 +1,16 @@
 ﻿<Application x:Class="ClipboardManager.App.App"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:imaging="clr-namespace:ClipboardManager.App.Imaging"
              ShutdownMode="OnExplicitShutdown">
     <!-- 注意：不设置 StartupUri —— 主窗口由 AppHost 按需创建与显示 -->
     <Application.Resources>
         <ResourceDictionary>
+
+            <!-- 缩略图惰性加载（配合列表虚拟化，只有可见行才解码；加载后不锁文件） -->
+            <imaging:ThumbnailConverter x:Key="ThumbnailConverter" />
+            <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
+            <SolidColorBrush x:Key="BadgeBackgroundBrush" Color="#E5DED0" />
 
             <!-- 第一版配色（暖米白，与用户偏好一致）。深浅色跟随在阶段三接入，
                  届时这些键会被主题字典整体替换；因此控件一律只引用这些键，不写死颜色。 -->
@@ -21,6 +27,8 @@
             <Style x:Key="ClipItemStyle" TargetType="ListBoxItem">
                 <Setter Property="Padding" Value="10,6" />
                 <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                <!-- 把显示文本暴露给 UI Automation：屏幕阅读器可读，自动化冒烟测试也能直接断言 -->
+                <Setter Property="AutomationProperties.Name" Value="{Binding DisplayText}" />
                 <Setter Property="Template">
                     <Setter.Value>
                         <ControlTemplate TargetType="ListBoxItem">

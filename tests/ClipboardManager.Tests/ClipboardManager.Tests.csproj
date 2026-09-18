@@ -4,6 +4,8 @@
     <TargetFramework>net8.0-windows</TargetFramework>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
+    <!-- 图片编解码测试需要 WPF 原生成像栈（BitmapSource / PngBitmapEncoder） -->
+    <UseWPF>true</UseWPF>
   </PropertyGroup>
 
   <ItemGroup>
@@ -20,6 +22,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\ClipboardManager.Core\ClipboardManager.Core.csproj" />
     <ProjectReference Include="..\..\src\ClipboardManager.Storage\ClipboardManager.Storage.csproj" />
+    <ProjectReference Include="..\..\src\ClipboardManager.App\ClipboardManager.App.csproj" />
   </ItemGroup>
 
 </Project>
