@@ -6,7 +6,10 @@
     <SolidColorBrush x:Key="PanelBorderBrush" Color="#3D3934" />
     <SolidColorBrush x:Key="PrimaryTextBrush" Color="#EDE8E0" />
     <SolidColorBrush x:Key="MutedTextBrush" Color="#A79E92" />
+    <SolidColorBrush x:Key="DisabledTextBrush" Color="#6B6358" />
     <SolidColorBrush x:Key="AccentBrush" Color="#6E9BF5" />
+    <SolidColorBrush x:Key="AccentHoverBrush" Color="#87AEF8" />
+    <SolidColorBrush x:Key="AccentTextBrush" Color="#15181F" />
     <SolidColorBrush x:Key="SelectionBrush" Color="#333C52" />
     <SolidColorBrush x:Key="HoverBrush" Color="#34302B" />
     <SolidColorBrush x:Key="BadgeBackgroundBrush" Color="#3A3630" />
@@ -15,4 +18,38 @@
     <SolidColorBrush x:Key="WarningTextBrush" Color="#E8CE86" />
     <SolidColorBrush x:Key="MenuBackgroundBrush" Color="#2A2724" />
     <SolidColorBrush x:Key="ControlBackgroundBrush" Color="#1C1A18" />
+    <SolidColorBrush x:Key="ControlHoverBrush" Color="#2A2724" />
+    <SolidColorBrush x:Key="ScrollThumbBrush" Color="#4A453E" />
+    <SolidColorBrush x:Key="ScrollThumbHoverBrush" Color="#5C554B" />
+    <SolidColorBrush x:Key="OverlayBrush" Color="#33000000" />
+
+    <!-- 各类内容的标识色（深色版：同样低饱和，保证正文对比度不受影响） -->
+    <SolidColorBrush x:Key="KindTextBackgroundBrush" Color="#3A3630" />
+    <SolidColorBrush x:Key="KindTextForegroundBrush" Color="#C4BAA9" />
+    <SolidColorBrush x:Key="KindImageBackgroundBrush" Color="#2E3B35" />
+    <SolidColorBrush x:Key="KindImageForegroundBrush" Color="#8FBFA8" />
+    <SolidColorBrush x:Key="KindFileBackgroundBrush" Color="#3E3524" />
+    <SolidColorBrush x:Key="KindFileForegroundBrush" Color="#D3B171" />
+    <SolidColorBrush x:Key="KindLinkBackgroundBrush" Color="#2C3448" />
+    <SolidColorBrush x:Key="KindLinkForegroundBrush" Color="#9CB3E0" />
+    <SolidColorBrush x:Key="KindHtmlBackgroundBrush" Color="#38303E" />
+    <SolidColorBrush x:Key="KindHtmlForegroundBrush" Color="#BC9FCA" />
+
+    <!-- 系统色接管：见浅色主题同名注释 -->
+    <SolidColorBrush x:Key="{x:Static SystemColors.WindowBrushKey}" Color="#2A2724" />
+    <SolidColorBrush x:Key="{x:Static SystemColors.WindowTextBrushKey}" Color="#EDE8E0" />
+    <SolidColorBrush x:Key="{x:Static SystemColors.ControlBrushKey}" Color="Transparent" />
+    <SolidColorBrush x:Key="{x:Static SystemColors.ControlTextBrushKey}" Color="#EDE8E0" />
+    <SolidColorBrush x:Key="{x:Static SystemColors.ControlLightBrushKey}" Color="Transparent" />
+    <SolidColorBrush x:Key="{x:Static SystemColors.ControlLightLightBrushKey}" Color="Transparent" />
+    <SolidColorBrush x:Key="{x:Static SystemColors.ControlDarkBrushKey}" Color="#3D3934" />
+    <SolidColorBrush x:Key="{x:Static SystemColors.ControlDarkDarkBrushKey}" Color="#3D3934" />
+    <SolidColorBrush x:Key="{x:Static SystemColors.HighlightBrushKey}" Color="#333C52" />
+    <SolidColorBrush x:Key="{x:Static SystemColors.HighlightTextBrushKey}" Color="#EDE8E0" />
+    <SolidColorBrush x:Key="{x:Static SystemColors.InactiveSelectionHighlightBrushKey}" Color="#34302B" />
+    <SolidColorBrush x:Key="{x:Static SystemColors.InactiveSelectionHighlightTextBrushKey}" Color="#EDE8E0" />
+    <SolidColorBrush x:Key="{x:Static SystemColors.GrayTextBrushKey}" Color="#6B6358" />
+    <SolidColorBrush x:Key="{x:Static SystemColors.MenuBrushKey}" Color="#2A2724" />
+    <SolidColorBrush x:Key="{x:Static SystemColors.MenuTextBrushKey}" Color="#EDE8E0" />
+    <SolidColorBrush x:Key="{x:Static SystemColors.MenuHighlightBrushKey}" Color="#333C52" />
 </ResourceDictionary>

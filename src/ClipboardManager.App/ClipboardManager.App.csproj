@@ -10,7 +10,18 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <!-- 托盘程序不需要控制台：诊断信息一律写 data/logs/app.log，不开控制台窗口 -->
     <DisableWinExeOutputInference>true</DisableWinExeOutputInference>
+    <!-- exe 文件图标（资源管理器/任务栏）；窗口与托盘图标在运行时读同一份 ICO 字节 -->
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 图标随程序集分发：窗口图标与托盘图标都从这份资源读，避免依赖外部文件 -->
+    <EmbeddedResource Include="Assets\app.ico" LogicalName="ClipboardManager.App.Assets.app.ico" />
+    <!-- 源图只作留档（用于重跑 scripts/make-icon.ps1），不参与打包 -->
+    <None Include="Assets\app-icon-source.png" />
+    <Resource Remove="Assets\app-icon-source.png" />
+    <Resource Remove="Assets\app.ico" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\ClipboardManager.Core\ClipboardManager.Core.csproj" />

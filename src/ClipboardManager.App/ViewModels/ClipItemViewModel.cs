@@ -32,6 +32,8 @@ public sealed class ClipItemViewModel
 
         Source = source;
         TypeLabel = PreviewBuilder.TypeLabel(source.Type);
+        KindKey = ResolveKind(source);
+        KindLabel = KindLabelFor(KindKey, TypeLabel);
         TimeText = RelativeTime.Format(source.UpdatedAt, now);
         ThumbnailPath = thumbnailPath;
         HasThumbnail = !string.IsNullOrEmpty(thumbnailPath);
@@ -54,6 +56,45 @@ public sealed class ClipItemViewModel
 
     /// <summary>类型徽标文字（文本 / HTML / 图片 / 文件）。</summary>
     public string TypeLabel { get; }
+
+    /// <summary>
+    /// 列表标识用的种类键：Text / Image / File / Html / Link。
+    /// <para>XAML 用它切换徽标配色与矢量图标（DataTrigger 绑定本属性）。</para>
+    /// </summary>
+    public string KindKey { get; }
+
+    /// <summary>种类徽标文字（与 <see cref="KindKey"/> 对应，网址会显示「网站」）。</summary>
+    public string KindLabel { get; }
+
+    /// <summary>判定种类：识别出单个网址时归为 Link（网站），其余按内容类型。</summary>
+    private static string ResolveKind(ClipItem source)
+    {
+        if (source.Type != ClipContentType.Text)
+        {
+            return source.Type switch
+            {
+                ClipContentType.Image => "Image",
+                ClipContentType.FileList => "File",
+                ClipContentType.Html => "Html",
+                _ => "Text",
+            };
+        }
+
+        // 文本类型再看是不是「单个网址」：只用于显示层标识，不改变存储与粘贴内容。
+        return LinkText.TryDetectUrl(source.TextContent, out _) || LinkText.TryDetectUrl(source.Preview, out _)
+            ? "Link"
+            : "Text";
+    }
+
+    private static string KindLabelFor(string kindKey, string fallback) => kindKey switch
+    {
+        "Link" => "网站",
+        "Image" => "图片",
+        "File" => "文件",
+        "Html" => "HTML",
+        "Text" => "文本",
+        _ => fallback,
+    };
 
     /// <summary>相对时间文案。</summary>
     public string TimeText { get; }

@@ -438,10 +438,16 @@ internal sealed class AppHost : IDisposable
         panel.CloseRequested += HidePanel;
         panel.SearchRequested += OnSearchRequested;
         panel.PinToggleRequested += OnPinToggleRequested;
+        panel.SettingsRequested += OnSettingsRequestedFromPanel;
         panel.SetQuotaHint(_quotaWarning);
+        panel.Icon = Imaging.AppIcon.TryLoadImageSource();
 
         // 立即创建 HWND：让 WS_EX_TOOLWINDOW 在显示前生效，并让首次 Show() 更快。
         _ = new WindowInteropHelper(panel).EnsureHandle();
+
+        // 面板是无边框自绘窗口，圆角与标题栏配色都得自己向 DWM 申请。
+        ApplyWindowAppearance(panel);
+
         _panel = panel;
         return panel;
     }
@@ -492,6 +498,20 @@ internal sealed class AppHost : IDisposable
     }
 
     private void HidePanel() => _panel?.Hide();
+
+    /// <summary>面板底部齿轮：先收起面板再打开设置，避免设置窗口被置顶面板压住。</summary>
+    private void OnSettingsRequestedFromPanel()
+    {
+        HidePanel();
+        ShowSettingsDialog();
+    }
+
+    /// <summary>把窗口外观（深色标题栏 / 圆角）对齐当前生效主题。</summary>
+    private void ApplyWindowAppearance(Window window)
+    {
+        var dark = string.Equals(ThemeManager.Current, Core.Theme.ThemeResolver.Dark, StringComparison.Ordinal);
+        Interop.WindowAppearance.ApplyTheme(new WindowInteropHelper(window).Handle, dark);
+    }
 
     private void OnSearchRequested(string query)
     {
@@ -710,7 +730,12 @@ internal sealed class AppHost : IDisposable
             var tray = _tray ??= new TrayIcon(_messageWindow!.Handle, MessageWindow.TrayCallbackMessage);
             var tooltip = $"剪贴板管理器 · {_settings.Hotkey}";
 
-            if (!tray.TryAddFromIco(TrayIconImage.BuildIco(), tooltip, out var error))
+            // 优先用应用图标（Assets/app.ico，与 exe/窗口图标同一份）；资源缺失时回退到运行时绘制的剪贴板图标。
+            var embeddedIcon = Imaging.AppIcon.TryReadBytes();
+            _log.Diag(embeddedIcon is null ? "托盘图标来源：运行时绘制（未找到嵌入资源）" : "托盘图标来源：嵌入资源 Assets/app.ico");
+            var ico = embeddedIcon ?? TrayIconImage.BuildIco();
+
+            if (!tray.TryAddFromIco(ico, tooltip, out var error))
             {
                 _log.Error("创建托盘图标失败：" + error);
                 return;
@@ -744,6 +769,11 @@ internal sealed class AppHost : IDisposable
         }
 
         var theme = ThemeManager.ApplyFromSetting(_settings.Theme);
+        if (_panel is not null)
+        {
+            ApplyWindowAppearance(_panel);
+        }
+
         _log.Diag($"系统主题变化，重新应用：{theme}");
     }
 
@@ -891,7 +921,7 @@ internal sealed class AppHost : IDisposable
     {
         try
         {
-            var window = new SettingsWindow(_settings);
+            var window = new SettingsWindow(_settings, MeasureDiskUsage, Storage.AppPaths.BlobDirectory);
             _ = window.ShowDialog();
 
             if (window.Result is { } updated)
@@ -903,6 +933,22 @@ internal sealed class AppHost : IDisposable
         {
             _log.Error("打开设置窗口失败", ex);
         }
+    }
+
+    /// <summary>统计当前磁盘占用（设置窗口在后台线程调用；仓储自带锁，跨线程安全）。</summary>
+    private DiskUsageInfo MeasureDiskUsage()
+    {
+        var count = 0;
+        try
+        {
+            count = _repository?.CountAll() ?? 0;
+        }
+        catch (Exception ex)
+        {
+            _log.Error("统计记录条数失败", ex);
+        }
+
+        return DiskUsage.Measure(count);
     }
 
     /// <summary>
@@ -934,8 +980,12 @@ internal sealed class AppHost : IDisposable
             _processor.CaptureImages = _settings.CaptureImages;
         }
 
-        // 3) 主题
+        // 3) 主题（面板标题栏/圆角要跟着重新申请，DWM 属性不会随资源字典自动变）
         _ = ThemeManager.ApplyFromSetting(_settings.Theme);
+        if (_panel is not null)
+        {
+            ApplyWindowAppearance(_panel);
+        }
 
         // 4) 开机自启
         ApplyAutoStart(_settings);

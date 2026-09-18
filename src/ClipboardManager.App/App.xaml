@@ -9,84 +9,13 @@
             <ResourceDictionary.MergedDictionaries>
                 <!-- 主题字典：启动时由 ThemeManager 按设置（system/light/dark）整体替换 -->
                 <ResourceDictionary Source="Themes/Light.xaml" />
+                <!-- 控件外观（圆角/深色适配）：与主题字典分离，切主题时不需要重建 -->
+                <ResourceDictionary Source="Themes/Styles.xaml" />
             </ResourceDictionary.MergedDictionaries>
 
             <!-- 缩略图惰性加载（配合列表虚拟化，只有可见行才解码；加载后不锁文件） -->
             <imaging:ThumbnailConverter x:Key="ThumbnailConverter" />
             <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
-
-            <!-- 控件一律引用主题键，不写死颜色；用 DynamicResource 才能在运行时切换主题 -->
-            <Style x:Key="ClipItemStyle" TargetType="ListBoxItem">
-                <Setter Property="Padding" Value="10,6" />
-                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-                <!-- 把显示文本暴露给 UI Automation：屏幕阅读器可读，自动化冒烟测试也能直接断言 -->
-                <Setter Property="AutomationProperties.Name" Value="{Binding DisplayText}" />
-                <Setter Property="Template">
-                    <Setter.Value>
-                        <ControlTemplate TargetType="ListBoxItem">
-                            <Border x:Name="Bd"
-                                    Margin="6,1"
-                                    Padding="{TemplateBinding Padding}"
-                                    Background="Transparent"
-                                    CornerRadius="4">
-                                <ContentPresenter />
-                            </Border>
-                            <ControlTemplate.Triggers>
-                                <Trigger Property="IsMouseOver" Value="True">
-                                    <Setter TargetName="Bd" Property="Background" Value="{DynamicResource HoverBrush}" />
-                                </Trigger>
-                                <Trigger Property="IsSelected" Value="True">
-                                    <Setter TargetName="Bd" Property="Background" Value="{DynamicResource SelectionBrush}" />
-                                </Trigger>
-                            </ControlTemplate.Triggers>
-                        </ControlTemplate>
-                    </Setter.Value>
-                </Setter>
-            </Style>
-
-            <!-- 无边框小按钮（关闭按钮 / 行内小按钮用） -->
-            <Style x:Key="FlatIconButtonStyle" TargetType="Button">
-                <Setter Property="Background" Value="Transparent" />
-                <Setter Property="BorderThickness" Value="0" />
-                <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}" />
-                <Setter Property="Width" Value="28" />
-                <Setter Property="Height" Value="24" />
-                <Setter Property="Cursor" Value="Hand" />
-                <Setter Property="Template">
-                    <Setter.Value>
-                        <ControlTemplate TargetType="Button">
-                            <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="4">
-                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
-                            </Border>
-                            <ControlTemplate.Triggers>
-                                <Trigger Property="IsMouseOver" Value="True">
-                                    <Setter TargetName="Bd" Property="Background" Value="{DynamicResource HoverBrush}" />
-                                </Trigger>
-                            </ControlTemplate.Triggers>
-                        </ControlTemplate>
-                    </Setter.Value>
-                </Setter>
-            </Style>
-
-            <!-- 普通按钮（设置窗口用） -->
-            <Style x:Key="DialogButtonStyle" TargetType="Button">
-                <Setter Property="MinWidth" Value="82" />
-                <Setter Property="Height" Value="30" />
-                <Setter Property="Margin" Value="6,0,0,0" />
-                <Setter Property="Cursor" Value="Hand" />
-                <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" />
-                <Setter Property="Background" Value="{DynamicResource ControlBackgroundBrush}" />
-                <Setter Property="BorderBrush" Value="{DynamicResource PanelBorderBrush}" />
-                <Setter Property="BorderThickness" Value="1" />
-            </Style>
-
-            <!-- 上下文菜单（面板右键：收藏 / 删除） -->
-            <Style x:Key="ClipContextMenuStyle" TargetType="ContextMenu">
-                <Setter Property="Background" Value="{DynamicResource MenuBackgroundBrush}" />
-                <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" />
-                <Setter Property="BorderBrush" Value="{DynamicResource PanelBorderBrush}" />
-                <Setter Property="BorderThickness" Value="1" />
-            </Style>
         </ResourceDictionary>
     </Application.Resources>
 </Application>

@@ -15,7 +15,10 @@
         FontSize="13"
         Background="{DynamicResource PanelBackgroundBrush}">
 
-    <Border BorderBrush="{DynamicResource PanelBorderBrush}" BorderThickness="1" Background="{DynamicResource PanelBackgroundBrush}">
+    <Border BorderBrush="{DynamicResource PanelBorderBrush}"
+            BorderThickness="1"
+            CornerRadius="8"
+            Background="{DynamicResource PanelBackgroundBrush}">
         <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
@@ -127,16 +130,12 @@
                                        Foreground="{DynamicResource PinnedBrush}"
                                        Text="{Binding PinGlyph}" />
 
-                            <!-- 类型徽标 -->
-                            <Border Grid.Column="1"
-                                    Margin="0,0,8,0"
-                                    Padding="5,1"
-                                    VerticalAlignment="Top"
-                                    CornerRadius="3"
-                                    Background="{DynamicResource BadgeBackgroundBrush}">
-                                <TextBlock FontSize="11"
-                                           Foreground="{DynamicResource MutedTextBrush}"
-                                           Text="{Binding TypeLabel}" />
+                            <!-- 类型徽标：每种内容一套柔和配色 + 矢量小图标（文本/图片/文件/网站/HTML） -->
+                            <Border Grid.Column="1" Style="{StaticResource KindChipStyle}">
+                                <StackPanel Orientation="Horizontal">
+                                    <Path Style="{StaticResource KindChipIconStyle}" />
+                                    <TextBlock Style="{StaticResource KindChipTextStyle}" Text="{Binding KindLabel}" />
+                                </StackPanel>
                             </Border>
 
                             <!-- 图片缩略图（只有图片记录才显示） -->
@@ -178,10 +177,36 @@
                        TextAlignment="Center"
                        Text="还没有记录&#x0a;复制任意文字后会自动出现在这里" />
 
-            <Border Grid.Row="4" Background="{DynamicResource HeaderBackgroundBrush}" Padding="12,6">
-                <TextBlock Foreground="{DynamicResource MutedTextBrush}"
-                           FontSize="12"
-                           Text="单击 / Enter 粘贴 · ↑↓ 选择 · Delete 删除 · 右键收藏 · Esc 关闭" />
+            <Border Grid.Row="4" Background="{DynamicResource HeaderBackgroundBrush}" Padding="12,4,8,4">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0"
+                               VerticalAlignment="Center"
+                               Foreground="{DynamicResource MutedTextBrush}"
+                               FontSize="12"
+                               TextTrimming="CharacterEllipsis"
+                               Text="单击 / Enter 粘贴 · ↑↓ 选择 · Delete 删除 · 右键收藏 · Esc 关闭" />
+                    <!-- 齿轮：直接打开设置窗口（省得去托盘右键） -->
+                    <Button x:Name="SettingsButton"
+                            Grid.Column="1"
+                            Style="{StaticResource FlatIconButtonStyle}"
+                            Click="OnSettingsButtonClick"
+                            ToolTip="打开设置">
+                        <Path Width="14"
+                              Height="14"
+                              Data="{StaticResource IconGear}"
+                              Fill="Transparent"
+                              Stretch="None"
+                              Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                              StrokeEndLineCap="Round"
+                              StrokeLineJoin="Round"
+                              StrokeStartLineCap="Round"
+                              StrokeThickness="1.3" />
+                    </Button>
+                </Grid>
             </Border>
         </Grid>
     </Border>

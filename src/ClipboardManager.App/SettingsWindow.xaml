@@ -40,6 +40,42 @@
                     <TextBlock Grid.Column="0" VerticalAlignment="Center" Text="磁盘占用上限" />
                     <ComboBox x:Name="DiskQuotaBox" Grid.Column="1" Height="28" />
                 </Grid>
+
+                <!-- 当前占用（实时刷新）+ 一键打开缓存目录 -->
+                <Border Margin="0,0,0,8"
+                        Padding="10,8"
+                        Background="{DynamicResource ControlBackgroundBrush}"
+                        BorderBrush="{DynamicResource PanelBorderBrush}"
+                        BorderThickness="1"
+                        CornerRadius="6">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                            <TextBlock x:Name="UsageText"
+                                       FontWeight="SemiBold"
+                                       Text="当前占用统计中…" />
+                            <TextBlock x:Name="UsageDetailText"
+                                       Margin="0,2,0,0"
+                                       FontSize="12"
+                                       Foreground="{DynamicResource MutedTextBrush}"
+                                       TextWrapping="Wrap" />
+                        </StackPanel>
+                        <Button x:Name="OpenCacheFolderButton"
+                                Grid.Column="1"
+                                Margin="10,0,0,0"
+                                VerticalAlignment="Center"
+                                MinWidth="0"
+                                Padding="10,0"
+                                Style="{StaticResource DialogButtonStyle}"
+                                ToolTip="在资源管理器里打开缓存目录（图片 / 富文本本体所在位置）"
+                                Content="打开缓存文件夹"
+                                Click="OnOpenCacheFolderClick" />
+                    </Grid>
+                </Border>
+
                 <TextBlock Margin="0,0,0,10"
                            TextWrapping="Wrap"
                            FontSize="12"
@@ -93,7 +129,7 @@
                            FontSize="12"
                            Foreground="{DynamicResource MutedTextBrush}"
                            Text="标记「不要进剪贴板历史」的程序（多数密码管理器）始终会被跳过，无需在此配置。" />
-                <Border BorderBrush="{DynamicResource PanelBorderBrush}" BorderThickness="1" CornerRadius="4" Height="96">
+                <Border BorderBrush="{DynamicResource PanelBorderBrush}" BorderThickness="1" CornerRadius="6" Height="96">
                     <ListBox x:Name="ExcludedListBox" BorderThickness="0" Background="Transparent" />
                 </Border>
                 <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
@@ -116,7 +152,7 @@
                            FontSize="12"
                            Foreground="{DynamicResource MutedTextBrush}" />
                 <Button Style="{StaticResource DialogButtonStyle}" Content="取消" Click="OnCancelClick" />
-                <Button Style="{StaticResource DialogButtonStyle}" Content="保存" Click="OnSaveClick" IsDefault="True" />
+                <Button Style="{StaticResource AccentButtonStyle}" Content="保存" Click="OnSaveClick" IsDefault="True" />
             </StackPanel>
         </Border>
     </Grid>

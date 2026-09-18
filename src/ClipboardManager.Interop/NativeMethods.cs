@@ -487,6 +487,18 @@ internal static class NativeMethods
     /// </summary>
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     internal static extern uint RegisterWindowMessageW(string lpString);
+
+    // ────────────────────── dwmapi.dll：窗口外观（圆角 / 深色标题栏） ──────────────────────
+
+    /// <summary>
+    /// 设置桌面窗口管理器（DWM）的窗口属性。
+    /// 作用：① 让标题栏跟随深色主题（<c>DWMWA_USE_IMMERSIVE_DARK_MODE</c>）
+    /// ② 请求圆角窗口（<c>DWMWA_WINDOW_CORNER_PREFERENCE</c>，Windows 11 才有效）。
+    /// 注意事项：Windows 10 及更早版本该 API 可能整体失败或忽略未知属性，返回非 0 时静默忽略即可
+    /// （外观增强，不影响功能）；属性值必须按 <c>int</c> 传（DWM 只读前 4 字节，传错长度会失败）。
+    /// </summary>
+    [DllImport("dwmapi.dll", SetLastError = true)]
+    internal static extern int DwmSetWindowAttribute(IntPtr hWnd, int attribute, ref int value, int size);
 }
 
 /// <summary>

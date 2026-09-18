@@ -57,6 +57,9 @@ public partial class PanelWindow : Window
     /// <summary>搜索词变化（已防抖）。</summary>
     public event Action<string>? SearchRequested;
 
+    /// <summary>请求打开设置窗口（底部齿轮按钮）。</summary>
+    public event Action? SettingsRequested;
+
     /// <summary>当前搜索词（已去除首尾空白）。</summary>
     public string CurrentQuery => SearchBox.Text.Trim();
 
@@ -122,6 +125,9 @@ public partial class PanelWindow : Window
     private ClipItem? SelectedItem => (ItemsList.SelectedItem as ClipItemViewModel)?.Source;
 
     private void OnCloseButtonClick(object sender, RoutedEventArgs e) => CloseRequested?.Invoke();
+
+    /// <summary>底部齿轮：请求打开设置（由宿主决定是否先隐藏面板）。</summary>
+    private void OnSettingsButtonClick(object sender, RoutedEventArgs e) => SettingsRequested?.Invoke();
 
     /// <summary>
     /// 右键按下时先选中光标下的条目。
