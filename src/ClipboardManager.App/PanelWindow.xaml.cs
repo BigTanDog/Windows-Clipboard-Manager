@@ -3,9 +3,11 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Interop;
+using System.Windows.Media;
 using System.Windows.Threading;
 using ClipboardManager.App.ViewModels;
 using ClipboardManager.Core.Models;
+using ClipboardManager.Core.Ui;
 using ClipboardManager.Interop;
 
 namespace ClipboardManager.App;
@@ -13,8 +15,10 @@ namespace ClipboardManager.App;
 /// <summary>
 /// 剪贴板历史面板（需求 §3.4）。
 /// <para>
-/// 激活模型（D-03）：窗口<b>正常激活</b>以获得键盘焦点；
-/// 「点击面板外部自动隐藏」已按用户要求移除（附加项 B-01），关闭手段为 Esc / 热键 / 关闭按钮。
+/// 激活模型（D-03）：窗口<b>正常激活</b>以获得键盘焦点，因此桌面点击会让它失去激活 ——
+/// 「点击面板外部自动隐藏」正是基于这一点实现（附加项 B-01，可在设置里关掉）；
+/// 其余关闭手段为 Esc / 热键 / 关闭按钮。窗口本身逐像素透明（<c>AllowsTransparency</c>），
+/// 底色与阴影由根卡片负责，这样才能叠上系统亚克力（附加项 B-04）。
 /// </para>
 /// </summary>
 public partial class PanelWindow : Window
@@ -23,6 +27,7 @@ public partial class PanelWindow : Window
 
     private readonly ObservableCollection<ClipItemViewModel> _items = [];
     private readonly DispatcherTimer _searchDebounce;
+    private bool _contextMenuOpen;
 
     /// <summary>创建面板。</summary>
     public PanelWindow()
@@ -40,7 +45,50 @@ public partial class PanelWindow : Window
             _searchDebounce.Stop();
             SearchRequested?.Invoke(CurrentQuery);
         };
+
+        Deactivated += OnPanelDeactivated;
     }
+
+    /// <summary>是否在失去激活（点击面板外部）时自动隐藏（附加项 B-01，由宿主按设置同步）。</summary>
+    public bool HideOnClickOutside { get; set; } = true;
+
+    /// <summary>
+    /// 应用亚克力底色（附加项 B-04）。
+    /// <para>
+    /// 强度 0 = 完全不透明，等价于原来的纯色面板；强度越大底色越透、系统模糊越明显。
+    /// 窗口本身已是逐像素透明，所以这里只改底色的 alpha。
+    /// </para>
+    /// </summary>
+    /// <param name="strength">亚克力强度 0–100。</param>
+    /// <param name="surfaceColor">当前主题的面板底色。</param>
+    /// <param name="headerColor">当前主题的标题栏/状态栏底色。</param>
+    public void ApplyAcrylic(int strength, Color surfaceColor, Color headerColor)
+    {
+        var alpha = (byte)AcrylicTint.AlphaByte(strength);
+
+        RootSurface.Background = new SolidColorBrush(Color.FromArgb(alpha, surfaceColor.R, surfaceColor.G, surfaceColor.B));
+
+        // 标题栏/状态栏比主体略实一点：那里是小字号提示，透明过头会看不清。
+        var headerAlpha = (byte)Math.Min(255, alpha + 24);
+        var headerBrush = new SolidColorBrush(Color.FromArgb(headerAlpha, headerColor.R, headerColor.G, headerColor.B));
+        HeaderBar.Background = headerBrush;
+        FooterBar.Background = headerBrush;
+    }
+
+    /// <summary>失去激活：按设置自动隐藏（右键菜单打开期间不隐藏，否则菜单会被连带关掉）。</summary>
+    private void OnPanelDeactivated(object? sender, EventArgs e)
+    {
+        if (!HideOnClickOutside || _contextMenuOpen)
+        {
+            return;
+        }
+
+        CloseRequested?.Invoke();
+    }
+
+    private void OnContextMenuOpened(object sender, RoutedEventArgs e) => _contextMenuOpen = true;
+
+    private void OnContextMenuClosed(object sender, RoutedEventArgs e) => _contextMenuOpen = false;
 
     /// <summary>请求粘贴某条记录（单击或 Enter）。</summary>
     public event Action<ClipItem>? PasteRequested;

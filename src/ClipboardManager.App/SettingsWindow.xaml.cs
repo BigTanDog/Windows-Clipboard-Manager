@@ -33,7 +33,9 @@ public partial class SettingsWindow : Window
     private readonly ObservableCollection<string> _excludedApps = [];
     private readonly Func<DiskUsageInfo> _measureUsage;
     private readonly string _cacheDirectory;
+    private readonly Action<int> _previewAcrylic;
     private readonly string _originalTheme;
+    private readonly int _originalAcrylic;
     private readonly DispatcherTimer _usageTimer;
     private bool _usageBusy;
     private bool _themeReverted;
@@ -42,15 +44,19 @@ public partial class SettingsWindow : Window
     /// <param name="current">当前设置（用于回显）。</param>
     /// <param name="measureUsage">统计磁盘占用的回调（在后台线程调用，避免大目录卡住界面）。</param>
     /// <param name="cacheDirectory">「打开缓存文件夹」的目标目录。</param>
-    public SettingsWindow(AppSettings current, Func<DiskUsageInfo> measureUsage, string cacheDirectory)
+    /// <param name="previewAcrylic">亚克力强度即时预览回调（不落盘；关窗取消时由本窗口回退）。</param>
+    public SettingsWindow(AppSettings current, Func<DiskUsageInfo> measureUsage, string cacheDirectory, Action<int> previewAcrylic)
     {
         ArgumentNullException.ThrowIfNull(current);
         ArgumentNullException.ThrowIfNull(measureUsage);
         ArgumentNullException.ThrowIfNull(cacheDirectory);
+        ArgumentNullException.ThrowIfNull(previewAcrylic);
 
         _measureUsage = measureUsage;
         _cacheDirectory = cacheDirectory;
+        _previewAcrylic = previewAcrylic;
         _originalTheme = current.Theme;
+        _originalAcrylic = current.AcrylicStrength;
 
         InitializeComponent();
 
@@ -67,7 +73,9 @@ public partial class SettingsWindow : Window
         AutoPasteBox.IsChecked = current.AutoPaste;
         MaskBox.IsChecked = current.MaskSensitiveData;
         ExcludeByProcessBox.IsChecked = current.ExcludeByProcessName;
+        HideOnClickOutsideBox.IsChecked = current.HideOnClickOutside;
         HotkeyBox.Text = current.Hotkey;
+        AcrylicSlider.Value = current.AcrylicStrength;
 
         // 开机自启回显以「注册表里的真实状态」为准，避免设置文件与实际不一致时误导用户。
         AutoStartBox.IsChecked = Interop.AutoStartRegistry.IsEnabledWith(
@@ -160,6 +168,20 @@ public partial class SettingsWindow : Window
         UsageDetailText.Text = usage.Describe();
     }
 
+    /// <summary>亚克力强度滑杆：更新数值文案并即时预览（不落盘）。</summary>
+    private void OnAcrylicStrengthChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (AcrylicValueText is null)
+        {
+            // 初始化阶段控件还没建好（Slider 在 XAML 里先于 TextBlock 赋值）
+            return;
+        }
+
+        var strength = (int)Math.Round(e.NewValue);
+        AcrylicValueText.Text = strength <= 0 ? "0（关闭）" : strength.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        _previewAcrylic(strength);
+    }
+
     /// <summary>打开缓存目录（图片 / 富文本本体所在位置）。</summary>
     private void OnOpenCacheFolderClick(object sender, RoutedEventArgs e)
     {
@@ -177,6 +199,7 @@ public partial class SettingsWindow : Window
         {
             _themeReverted = true;
             _ = ThemeManager.ApplyFromSetting(_originalTheme);
+            _previewAcrylic(_originalAcrylic);
         }
 
         base.OnClosed(e);
@@ -274,6 +297,8 @@ public partial class SettingsWindow : Window
             CaptureImages = CaptureImagesBox.IsChecked == true,
             Theme = theme,
             MaskSensitiveData = MaskBox.IsChecked == true,
+            HideOnClickOutside = HideOnClickOutsideBox.IsChecked == true,
+            AcrylicStrength = (int)Math.Round(AcrylicSlider.Value),
         }.Normalize();
 
         return true;

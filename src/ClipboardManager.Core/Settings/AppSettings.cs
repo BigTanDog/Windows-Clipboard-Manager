@@ -1,4 +1,5 @@
 using ClipboardManager.Core.AutoStart;
+using ClipboardManager.Core.Ui;
 
 namespace ClipboardManager.Core.Settings;
 
@@ -61,6 +62,17 @@ public sealed record AppSettings
     /// <summary>是否对敏感信息做脱敏显示（产品计划 D-13，默认开启）。</summary>
     public bool MaskSensitiveData { get; init; } = true;
 
+    /// <summary>
+    /// 点击面板外部（面板失去激活）时自动隐藏（附加项 B-01，默认开启）。
+    /// <para>右键菜单打开期间不触发，避免菜单刚弹出面板就被收起。</para>
+    /// </summary>
+    public bool HideOnClickOutside { get; init; } = true;
+
+    /// <summary>
+    /// 亚克力强度 0–100（附加项 B-04）：0 = 不透明（关闭），数值越大越透、模糊越明显。
+    /// </summary>
+    public int AcrylicStrength { get; init; }
+
     /// <summary>默认设置。</summary>
     public static AppSettings Default { get; } = new();
 
@@ -94,6 +106,8 @@ public sealed record AppSettings
             && CaptureImages == other.CaptureImages
             && string.Equals(Theme, other.Theme, StringComparison.Ordinal)
             && MaskSensitiveData == other.MaskSensitiveData
+            && HideOnClickOutside == other.HideOnClickOutside
+            && AcrylicStrength == other.AcrylicStrength
             && ExcludedApps.SequenceEqual(other.ExcludedApps, StringComparer.OrdinalIgnoreCase);
     }
 
@@ -112,6 +126,8 @@ public sealed record AppSettings
         hash.Add(CaptureImages);
         hash.Add(Theme, StringComparer.Ordinal);
         hash.Add(MaskSensitiveData);
+        hash.Add(HideOnClickOutside);
+        hash.Add(AcrylicStrength);
         foreach (var app in ExcludedApps)
         {
             hash.Add(app, StringComparer.OrdinalIgnoreCase);
@@ -140,6 +156,7 @@ public sealed record AppSettings
             Hotkey = string.IsNullOrWhiteSpace(Hotkey) ? DefaultHotkey : Hotkey.Trim(),
             Theme = theme,
             AutoStartDelaySeconds = Math.Clamp(AutoStartDelaySeconds, 0, AutoStartCommand.MaxDelaySeconds),
+            AcrylicStrength = AcrylicTint.Normalize(AcrylicStrength),
             ExcludedApps = ExcludedApps?
                 .Where(static x => !string.IsNullOrWhiteSpace(x))
                 .Select(static x => x.Trim())

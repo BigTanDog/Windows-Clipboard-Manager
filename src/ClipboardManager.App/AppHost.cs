@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Windows;
 using System.Windows.Interop;
+using System.Windows.Media;
 using System.Windows.Threading;
 using ClipboardManager.App.Imaging;
 using ClipboardManager.App.Theme;
@@ -59,6 +60,9 @@ internal sealed class AppHost : IDisposable
     private long _lastProcessedSequence = -1;
     private string _query = string.Empty;
     private string? _quotaWarning;
+
+    /// <summary>设置窗口拖动亚克力滑杆时的临时预览值（未保存；null 表示用设置里的值）。</summary>
+    private int? _acrylicPreview;
     private bool _disposed;
 
     /// <summary>创建宿主。</summary>
@@ -441,14 +445,15 @@ internal sealed class AppHost : IDisposable
         panel.SettingsRequested += OnSettingsRequestedFromPanel;
         panel.SetQuotaHint(_quotaWarning);
         panel.Icon = Imaging.AppIcon.TryLoadImageSource();
+        panel.HideOnClickOutside = _settings.HideOnClickOutside;
 
         // 立即创建 HWND：让 WS_EX_TOOLWINDOW 在显示前生效，并让首次 Show() 更快。
         _ = new WindowInteropHelper(panel).EnsureHandle();
 
-        // 面板是无边框自绘窗口，圆角与标题栏配色都得自己向 DWM 申请。
-        ApplyWindowAppearance(panel);
-
         _panel = panel;
+
+        // 面板是无边框自绘窗口：圆角/标题栏配色向 DWM 申请，底色与亚克力走窗口合成。
+        ApplyPanelAppearance();
         return panel;
     }
 
@@ -512,6 +517,48 @@ internal sealed class AppHost : IDisposable
         var dark = string.Equals(ThemeManager.Current, Core.Theme.ThemeResolver.Dark, StringComparison.Ordinal);
         Interop.WindowAppearance.ApplyTheme(new WindowInteropHelper(window).Handle, dark);
     }
+
+    /// <summary>
+    /// 刷新面板外观：DWM 圆角与标题栏配色 + 底色与亚克力强度（B-04，含滑杆预览值）。
+    /// </summary>
+    private void ApplyPanelAppearance()
+    {
+        var panel = _panel;
+        if (panel is null)
+        {
+            return;
+        }
+
+        ApplyWindowAppearance(panel);
+
+        var strength = _acrylicPreview ?? _settings.AcrylicStrength;
+        var surface = ReadThemeColor("PanelBackgroundBrush");
+        var header = ReadThemeColor("HeaderBackgroundBrush");
+        panel.ApplyAcrylic(strength, surface, header);
+
+        var applied = Interop.WindowAppearance.ApplyAcrylic(
+            new WindowInteropHelper(panel).Handle,
+            strength,
+            surface.R,
+            surface.G,
+            surface.B);
+
+        if (AcrylicTint.IsEnabled(strength) && !applied)
+        {
+            _log.Diag("亚克力模糊未生效（系统不支持时只保留半透明底色）");
+        }
+    }
+
+    /// <summary>设置窗口拖动强度滑杆时的即时预览（不落盘，关窗时由窗口回退）。</summary>
+    private void PreviewAcrylic(int strength)
+    {
+        _acrylicPreview = AcrylicTint.Normalize(strength);
+        ApplyPanelAppearance();
+    }
+
+    /// <summary>读取主题色（资源缺失时回退透明：亚克力自然失效，功能不受影响）。</summary>
+    private static Color ReadThemeColor(string key) =>
+        Application.Current?.TryFindResource(key) is SolidColorBrush brush ? brush.Color : Colors.Transparent;
 
     private void OnSearchRequested(string query)
     {
@@ -769,10 +816,7 @@ internal sealed class AppHost : IDisposable
         }
 
         var theme = ThemeManager.ApplyFromSetting(_settings.Theme);
-        if (_panel is not null)
-        {
-            ApplyWindowAppearance(_panel);
-        }
+        ApplyPanelAppearance();
 
         _log.Diag($"系统主题变化，重新应用：{theme}");
     }
@@ -921,7 +965,7 @@ internal sealed class AppHost : IDisposable
     {
         try
         {
-            var window = new SettingsWindow(_settings, MeasureDiskUsage, Storage.AppPaths.BlobDirectory);
+            var window = new SettingsWindow(_settings, MeasureDiskUsage, Storage.AppPaths.BlobDirectory, PreviewAcrylic);
             _ = window.ShowDialog();
 
             if (window.Result is { } updated)
@@ -980,26 +1024,31 @@ internal sealed class AppHost : IDisposable
             _processor.CaptureImages = _settings.CaptureImages;
         }
 
-        // 3) 主题（面板标题栏/圆角要跟着重新申请，DWM 属性不会随资源字典自动变）
+        // 3) 主题（面板标题栏/圆角/亚克力底色要跟着重新申请，DWM 属性不会随资源字典自动变）
         _ = ThemeManager.ApplyFromSetting(_settings.Theme);
+
+        // 4) 面板外观与交互（B-01 自动隐藏、B-04 亚克力强度）：预览值让位给落盘值
+        _acrylicPreview = null;
         if (_panel is not null)
         {
-            ApplyWindowAppearance(_panel);
+            _panel.HideOnClickOutside = _settings.HideOnClickOutside;
         }
 
-        // 4) 开机自启
+        ApplyPanelAppearance();
+
+        // 5) 开机自启
         ApplyAutoStart(_settings);
 
-        // 5) 热键（仅在变化时重注册，避免无谓的中断）
+        // 6) 热键（仅在变化时重注册，避免无谓的中断）
         if (!string.Equals(previous.Hotkey, _settings.Hotkey, StringComparison.Ordinal))
         {
             ReRegisterHotkey(_settings.Hotkey);
         }
 
-        // 6) 托盘提示里的热键文案同步
+        // 7) 托盘提示里的热键文案同步
         _tray?.UpdateTooltip($"剪贴板管理器 · {_settings.Hotkey}");
 
-        // 7) 上限变化立即生效（可能触发淘汰），并刷新列表让脱敏开关立刻可见
+        // 8) 上限变化立即生效（可能触发淘汰），并刷新列表让脱敏开关立刻可见
         _ = Task.Run(async () =>
         {
             await _backgroundGate.WaitAsync().ConfigureAwait(false);
