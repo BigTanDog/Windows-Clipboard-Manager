@@ -1,0 +1,21 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <!-- 需求 §4.2 约定产物名为 ClipboardManager.exe -->
+    <AssemblyName>ClipboardManager</AssemblyName>
+    <RootNamespace>ClipboardManager.App</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- 托盘程序不需要控制台：诊断信息一律写 data/logs/app.log，不开控制台窗口 -->
+    <DisableWinExeOutputInference>true</DisableWinExeOutputInference>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ClipboardManager.Core\ClipboardManager.Core.csproj" />
+    <ProjectReference Include="..\ClipboardManager.Interop\ClipboardManager.Interop.csproj" />
+    <ProjectReference Include="..\ClipboardManager.Storage\ClipboardManager.Storage.csproj" />
+  </ItemGroup>
+
+</Project>

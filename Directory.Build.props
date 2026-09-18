@@ -1,0 +1,17 @@
+<Project>
+
+  <!-- 全局编译基线（依据《技术设计文档》第 1.1 节） -->
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest</AnalysisLevel>
+    <Deterministic>true</Deterministic>
+    <!-- 第一版只交付 win-x64（产品计划 D-12 / Q-4）；显式固定目标平台，
+         保证 GetWindowLongPtr 等仅存在于 64 位 user32 的 API 调用语义正确。 -->
+    <PlatformTarget>x64</PlatformTarget>
+  </PropertyGroup>
+
+</Project>

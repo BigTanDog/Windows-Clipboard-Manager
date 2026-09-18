@@ -1,0 +1,24 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <!-- 读取剪贴板文本时需要在有长度上限的前提下逐字符扫描（防畸形数据无限读取），
+         因此开启 unsafe（见 ClipboardAccess.ReadText）。 -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- 实现偏差记录（2026-09-18）：技术设计 §2.1 原计划用 CsWin32 生成 P/Invoke。
+         实际改为手写 DllImport 薄封装，理由：
+         ① AGENTS.md 要求「涉及 Win32 API 的代码都要注释作用与调用注意事项」，
+            生成代码无法承载注释，手写可以让每条声明都带说明与释放责任；
+         ② CsWin32 生成的窗口过程为函数指针类型，需 UnmanagedCallersOnly 静态路由，
+            对本项目约 25 个 API 的规模而言复杂度高于收益。
+         本偏差已在阶段一汇报中告知用户，并同步至技术设计文档。 -->
+    <!-- 使用 DllImport 而非 LibraryImport：WNDCLASSEXW / NOTIFYICONDATA 等含字符串字段，
+         需显式 MarshalAs 控制，且窗口过程必须用委托 （LibraryImport 不适用）。 -->
+    <NoWarn>$(NoWarn);SYSLIB1054</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ClipboardManager.Core\ClipboardManager.Core.csproj" />
+  </ItemGroup>
+
+</Project>

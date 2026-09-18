@@ -1,0 +1,107 @@
+<Window x:Class="ClipboardManager.App.PanelWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="剪贴板历史"
+        Width="420"
+        Height="460"
+        WindowStyle="None"
+        ResizeMode="NoResize"
+        WindowStartupLocation="Manual"
+        ShowInTaskbar="False"
+        Topmost="True"
+        UseLayoutRounding="True"
+        TextOptions.TextFormattingMode="Display"
+        FontFamily="Microsoft YaHei UI, Segoe UI"
+        FontSize="13"
+        Background="{StaticResource PanelBackgroundBrush}">
+
+    <Border BorderBrush="{StaticResource PanelBorderBrush}" BorderThickness="1" Background="{StaticResource PanelBackgroundBrush}">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <!-- 标题栏 -->
+            <Border Grid.Row="0" Background="{StaticResource HeaderBackgroundBrush}" Padding="12,8">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0"
+                               VerticalAlignment="Center"
+                               FontWeight="SemiBold"
+                               Foreground="{StaticResource PrimaryTextBrush}"
+                               Text="剪贴板历史" />
+                    <TextBlock Grid.Column="1"
+                               Margin="8,0,4,0"
+                               VerticalAlignment="Center"
+                               Foreground="{StaticResource MutedTextBrush}"
+                               x:Name="CountText" />
+                    <Button Grid.Column="2"
+                            Style="{StaticResource FlatIconButtonStyle}"
+                            Click="OnCloseButtonClick"
+                            ToolTip="关闭面板（Esc）"
+                            Content="✕" />
+                </Grid>
+            </Border>
+
+            <!-- 记录列表：虚拟化 + 回收，保证数百条仍然流畅 -->
+            <ListBox x:Name="ItemsList"
+                     Grid.Row="1"
+                     Background="Transparent"
+                     BorderThickness="0"
+                     Padding="0,4"
+                     ItemContainerStyle="{StaticResource ClipItemStyle}"
+                     HorizontalContentAlignment="Stretch"
+                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                     ScrollViewer.VerticalScrollBarVisibility="Auto"
+                     VirtualizingPanel.IsVirtualizing="True"
+                     VirtualizingPanel.VirtualizationMode="Recycling"
+                     ScrollViewer.CanContentScroll="True"
+                     PreviewKeyDown="OnListPreviewKeyDown"
+                     PreviewMouseLeftButtonUp="OnListMouseLeftButtonUp">
+                <ListBox.ItemTemplate>
+                    <DataTemplate>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0"
+                                       Text="{Binding DisplayText}"
+                                       Foreground="{StaticResource PrimaryTextBrush}"
+                                       TextTrimming="CharacterEllipsis"
+                                       ToolTip="{Binding Tooltip}" />
+                            <TextBlock Grid.Column="1"
+                                       Margin="10,0,0,0"
+                                       VerticalAlignment="Center"
+                                       Foreground="{StaticResource MutedTextBrush}"
+                                       FontSize="12"
+                                       Text="{Binding TimeText}" />
+                        </Grid>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+
+            <!-- 空态提示 + 快捷键说明 -->
+            <TextBlock x:Name="EmptyHint"
+                       Grid.Row="1"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center"
+                       Foreground="{StaticResource MutedTextBrush}"
+                       Visibility="Collapsed"
+                       TextAlignment="Center"
+                       Text="还没有记录&#x0a;复制任意文字后会自动出现在这里" />
+
+            <Border Grid.Row="2" Background="{StaticResource HeaderBackgroundBrush}" Padding="12,6">
+                <TextBlock Foreground="{StaticResource MutedTextBrush}"
+                           FontSize="12"
+                           Text="单击 / Enter 粘贴 · ↑↓ 选择 · Delete 删除 · Esc 关闭" />
+            </Border>
+        </Grid>
+    </Border>
+</Window>

@@ -1,0 +1,13 @@
+# 构建产物
+bin/
+obj/
+artifacts/
+publish/
+
+# IDE
+.vs/
+*.user
+*.suo
+
+# 运行时数据目录（程序目录下的 data/ 由程序自己创建，不入库）
+data/
