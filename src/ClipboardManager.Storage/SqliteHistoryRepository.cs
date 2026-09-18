@@ -1,4 +1,5 @@
 using ClipboardManager.Core.Models;
+using ClipboardManager.Core.Retention;
 using Microsoft.Data.Sqlite;
 
 namespace ClipboardManager.Storage;
@@ -235,7 +236,7 @@ public sealed class SqliteHistoryRepository : IDisposable
 
     /// <summary>
     /// 按条数上限淘汰（需求 §3.3 / 技术设计 §4.5）：只淘汰非收藏项，保留最近 <paramref name="maxItems"/> 条非收藏记录。
-    /// 返回被淘汰记录的本体路径，供调用方删除文件（避免堆积孤儿文件）。
+    /// 决策交给 <see cref="RetentionPlanner.PlanByCount"/>（纯函数，可单测），本方法只负责执行删除。
     /// </summary>
     /// <param name="maxItems">条数上限；-1 表示不限制。</param>
     public EvictionResult EnforceMaxItems(int maxItems)
@@ -245,66 +246,115 @@ public sealed class SqliteHistoryRepository : IDisposable
             return new EvictionResult(0, []);
         }
 
+        var doomed = RetentionPlanner.PlanByCount(GetRetentionCandidates(), maxItems);
+        if (doomed.Count == 0)
+        {
+            return new EvictionResult(0, []);
+        }
+
+        return new EvictionResult(doomed.Count, DeleteMany(doomed));
+    }
+
+    /// <summary>
+    /// 切换收藏状态（需求 §3.3：收藏项永不参与自动淘汰）。
+    /// </summary>
+    /// <param name="id">记录主键。</param>
+    /// <param name="pinned">true 收藏，false 取消收藏。</param>
+    public bool SetPinned(long id, bool pinned)
+    {
+        lock (_gate)
+        {
+            var connection = EnsureConnection();
+            using var command = connection.CreateCommand();
+            command.CommandText = "UPDATE clip_items SET is_pinned = $pinned WHERE id = $id;";
+            command.Parameters.AddWithValue("$pinned", pinned ? 1 : 0);
+            command.Parameters.AddWithValue("$id", id);
+            return command.ExecuteNonQuery() > 0;
+        }
+    }
+
+    /// <summary>取全部记录的淘汰决策信息（纯数据，供 <c>RetentionPlanner</c> 计算，不返回内容）。</summary>
+    public IReadOnlyList<RetentionCandidate> GetRetentionCandidates()
+    {
+        lock (_gate)
+        {
+            var connection = EnsureConnection();
+            using var command = connection.CreateCommand();
+            command.CommandText = "SELECT id, is_pinned, size_bytes, updated_at FROM clip_items;";
+
+            var items = new List<RetentionCandidate>();
+            using var reader = command.ExecuteReader();
+            while (reader.Read())
+            {
+                items.Add(new RetentionCandidate(
+                    reader.GetInt64(0),
+                    reader.GetInt32(1) != 0,
+                    reader.IsDBNull(2) ? 0 : reader.GetInt64(2),
+                    reader.GetInt64(3)));
+            }
+
+            return items;
+        }
+    }
+
+    /// <summary>
+    /// 批量删除并返回被删记录的本体路径（调用方据此删文件，避免孤儿）。
+    /// <para>
+    /// 说明：<c>IN</c> 里的占位符是按<b>条数</b>生成的（来自 <c>ids.Count</c>，不含任何用户输入），
+    /// 值一律走参数，不存在 SQL 注入面。
+    /// </para>
+    /// </summary>
+    /// <param name="ids">要删除的记录主键。</param>
+    public IReadOnlyList<string> DeleteMany(IReadOnlyList<long> ids)
+    {
+        ArgumentNullException.ThrowIfNull(ids);
+        if (ids.Count == 0)
+        {
+            return [];
+        }
+
         lock (_gate)
         {
             var connection = EnsureConnection();
             using var transaction = connection.BeginTransaction();
 
+            var placeholders = string.Join(", ", ids.Select(static (_, index) => "$id" + index));
             var blobPaths = new List<string>();
-            var doomed = 0;
 
             using (var select = connection.CreateCommand())
             {
                 select.Transaction = transaction;
-                select.CommandText = """
-                    SELECT id, blob_path FROM clip_items
-                    WHERE is_pinned = 0
-                      AND id IN (
-                        SELECT id FROM clip_items
-                        WHERE is_pinned = 0
-                        ORDER BY updated_at DESC, id DESC
-                        LIMIT -1 OFFSET $maxItems
-                      );
-                    """;
-                select.Parameters.AddWithValue("$maxItems", maxItems);
+                select.CommandText = $"SELECT blob_path FROM clip_items WHERE id IN ({placeholders});";
+                AddIdParameters(select, ids);
 
                 using var reader = select.ExecuteReader();
                 while (reader.Read())
                 {
-                    doomed++;
-                    if (!reader.IsDBNull(1))
+                    if (!reader.IsDBNull(0))
                     {
-                        blobPaths.Add(reader.GetString(1));
+                        blobPaths.Add(reader.GetString(0));
                     }
                 }
             }
 
-            if (doomed == 0)
-            {
-                transaction.Commit();
-                return new EvictionResult(0, []);
-            }
-
-            // 删除条件与上面 SELECT 完全一致（同一条子查询），不做动态 SQL 拼接。
             using (var delete = connection.CreateCommand())
             {
                 delete.Transaction = transaction;
-                delete.CommandText = """
-                    DELETE FROM clip_items
-                    WHERE is_pinned = 0
-                      AND id IN (
-                        SELECT id FROM clip_items
-                        WHERE is_pinned = 0
-                        ORDER BY updated_at DESC, id DESC
-                        LIMIT -1 OFFSET $maxItems
-                      );
-                    """;
-                delete.Parameters.AddWithValue("$maxItems", maxItems);
+                delete.CommandText = $"DELETE FROM clip_items WHERE id IN ({placeholders});";
+                AddIdParameters(delete, ids);
                 delete.ExecuteNonQuery();
             }
 
             transaction.Commit();
-            return new EvictionResult(doomed, blobPaths);
+            return blobPaths;
+        }
+    }
+
+    private static void AddIdParameters(SqliteCommand command, IReadOnlyList<long> ids)
+    {
+        for (var index = 0; index < ids.Count; index++)
+        {
+            command.Parameters.AddWithValue("$id" + index, ids[index]);
         }
     }
 

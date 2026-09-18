@@ -30,6 +30,12 @@ internal static class NativeMethods
     /// <summary>自定义消息起点：WM_APP + n，用于后台线程请求 STA 线程执行剪贴板写回。</summary>
     internal const uint WM_APP = 0x8000;
 
+    /// <summary>系统度量索引：小图标宽度（托盘用），96 DPI 下为 16。</summary>
+    internal const int SM_CXSMICON = 49;
+
+    /// <summary>窗口样式：弹出式窗口（无边框、无标题栏）。用于创建完全不显示的隐藏消息窗口。</summary>
+    internal const uint WS_POPUP = 0x80000000;
+
     /// <summary>纯文本剪贴板格式（UTF-16，NUL 结尾）。</summary>
     internal const uint CF_UNICODETEXT = 13;
 
@@ -402,4 +408,121 @@ internal static class NativeMethods
     /// <summary>取窗口所在显示器的 DPI。作用：物理像素与 WPF 的 DIP 换算。注意事项：PerMonitorV2 下每块屏可能不同，必须每次弹出重新计算。</summary>
     [DllImport("user32.dll")]
     internal static extern uint GetDpiForWindow(IntPtr hWnd);
+
+    // ────────────────────── shell32.dll：托盘图标 ──────────────────────
+
+    /// <summary>
+    /// 增删改系统托盘图标。作用：常驻通知区（需求 §3.5）。
+    /// 注意事项：① 必须传完整 <c>cbSize</c>；② 删除后 HICON 才能 DestroyIcon；
+    /// ③ 资源管理器重启会清空托盘，需要处理 <c>TaskbarCreated</c> 消息后重新 NIM_ADD。
+    /// </summary>
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool Shell_NotifyIconW(uint dwMessage, ref NOTIFYICONDATAW lpData);
+
+    /// <summary>创建弹出菜单。作用：托盘右键菜单。注意事项：用完必须 DestroyMenu，否则泄漏 USER 句柄。</summary>
+    [DllImport("user32.dll", SetLastError = true)]
+    internal static extern IntPtr CreatePopupMenu();
+
+    /// <summary>追加菜单项。作用：构造托盘菜单。注意事项：<c>uIDNewItem</c> 传菜单项 id（或子菜单句柄）。</summary>
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool AppendMenuW(IntPtr hMenu, uint uFlags, nuint uIDNewItem, string? lpNewItem);
+
+    /// <summary>
+    /// 在指定位置弹出菜单（扩展版，无需 TRACKPOPUPMENU 结构）。作用：托盘右键菜单。
+    /// 注意事项：① 托盘点击不会激活窗口，弹出前必须 <c>SetForegroundWindow</c>，返回后补一条 <c>WM_NULL</c>，
+    /// 否则菜单会"关不掉"；② 用 <c>TPM_RETURNCMD</c> 时返回值即选中的菜单项 id，不需要 WM_COMMAND。
+    /// </summary>
+    [DllImport("user32.dll", SetLastError = true)]
+    internal static extern int TrackPopupMenuEx(IntPtr hMenu, uint fuFlags, int x, int y, IntPtr hWnd, IntPtr lptpm);
+
+    /// <summary>销毁菜单。见 <see cref="CreatePopupMenu"/>。</summary>
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool DestroyMenu(IntPtr hMenu);
+
+    /// <summary>销毁图标句柄。见 <see cref="CreateIconFromResourceEx"/>。</summary>
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool DestroyIcon(IntPtr hIcon);
+
+    /// <summary>
+    /// 由「单个图标图像」数据创建图标句柄（<b>不是</b>整个 .ico 文件；整份传会失败）。
+    /// 作用：托盘图标。注意事项：PNG 压缩的图像必须传 <c>dwVer = 0x00030000</c>；
+    /// 用完（且在 NIM_DELETE 之后）必须 DestroyIcon，否则句柄泄漏。
+    /// </summary>
+    [DllImport("user32.dll", SetLastError = true)]
+    internal static extern IntPtr CreateIconFromResourceEx(
+        byte[] presbits,
+        uint dwResSize,
+        [MarshalAs(UnmanagedType.Bool)] bool fIcon,
+        uint dwVer,
+        int cxDesired,
+        int cyDesired,
+        uint flags);
+
+    /// <summary>
+    /// 在 .ico 文件镜像里按尺寸查找最合适的图像偏移。
+    /// 作用：作为 PNG 直传失败时的兜底路径（文档推荐的两步法第一步）。
+    /// 注意事项：返回 0 表示没有可用图像；传入的是整份 .ico 数据时返回的是数据偏移。
+    /// </summary>
+    [DllImport("user32.dll", SetLastError = true)]
+    internal static extern int LookupIconIdFromDirectoryEx(
+        byte[] presbits,
+        [MarshalAs(UnmanagedType.Bool)] bool fIcon,
+        int cxDesired,
+        int cyDesired,
+        uint flags);
+
+    /// <summary>取系统度量值。作用：拿托盘小图标的标准边长（<c>SM_CXSMICON</c>），据此选择图标尺寸。</summary>
+    [DllImport("user32.dll")]
+    internal static extern int GetSystemMetrics(int nIndex);
+
+    /// <summary>
+    /// 注册一个全局唯一的窗口消息号（同名返回同一个值）。
+    /// 作用：拿到资源管理器广播的 <c>TaskbarCreated</c> 消息号 —— 资源管理器重启后托盘图标会消失，
+    /// 收到该消息必须重新添加图标，否则图标永久不见。
+    /// 注意事项：返回值 0 表示失败；本消息号是运行时才知道的，不能用常量 switch，需与保存的值比较。
+    /// </summary>
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    internal static extern uint RegisterWindowMessageW(string lpString);
+}
+
+/// <summary>
+/// 托盘图标数据结构（NOTIFYICONDATAW，Vista+ 完整版）。
+/// <para>
+/// 字段顺序与自然对齐必须与 Win32 一致（<c>hWnd</c> 前、<c>hIcon</c> 前各有一段隐式 4 字节填充），
+/// <c>cbSize</c> 必须等于 <c>Marshal.SizeOf&lt;NOTIFYICONDATAW&gt;()</c>，否则 Shell_NotifyIcon 会直接失败。
+/// 定义在命名空间级而非类内，便于 <see cref="TrayIcon"/> 使用。
+/// </para>
+/// </summary>
+[StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+internal struct NOTIFYICONDATAW
+{
+    public uint cbSize;
+    public IntPtr hWnd;
+    public uint uID;
+    public uint uFlags;
+    public uint uCallbackMessage;
+    public IntPtr hIcon;
+
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
+    public string szTip;
+
+    public uint dwState;
+    public uint dwStateMask;
+
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)]
+    public string szInfo;
+
+    /// <summary>超时（老版本）或图标版本（NOTIFYICON_VERSION_4）共用同一块内存。</summary>
+    public uint uVersion;
+
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)]
+    public string szInfoTitle;
+
+    public uint dwInfoFlags;
+    public Guid guidItem;
+    public IntPtr hBalloonIcon;
 }

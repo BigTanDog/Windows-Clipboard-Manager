@@ -13,11 +13,12 @@
         TextOptions.TextFormattingMode="Display"
         FontFamily="Microsoft YaHei UI, Segoe UI"
         FontSize="13"
-        Background="{StaticResource PanelBackgroundBrush}">
+        Background="{DynamicResource PanelBackgroundBrush}">
 
-    <Border BorderBrush="{StaticResource PanelBorderBrush}" BorderThickness="1" Background="{StaticResource PanelBackgroundBrush}">
+    <Border BorderBrush="{DynamicResource PanelBorderBrush}" BorderThickness="1" Background="{DynamicResource PanelBackgroundBrush}">
         <Grid>
             <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
@@ -25,7 +26,7 @@
             </Grid.RowDefinitions>
 
             <!-- 标题栏 -->
-            <Border Grid.Row="0" Background="{StaticResource HeaderBackgroundBrush}" Padding="12,8,12,6">
+            <Border Grid.Row="0" Background="{DynamicResource HeaderBackgroundBrush}" Padding="12,8,12,6">
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
@@ -35,12 +36,12 @@
                     <TextBlock Grid.Column="0"
                                VerticalAlignment="Center"
                                FontWeight="SemiBold"
-                               Foreground="{StaticResource PrimaryTextBrush}"
+                               Foreground="{DynamicResource PrimaryTextBrush}"
                                Text="剪贴板历史" />
                     <TextBlock Grid.Column="1"
                                Margin="8,0,4,0"
                                VerticalAlignment="Center"
-                               Foreground="{StaticResource MutedTextBrush}"
+                               Foreground="{DynamicResource MutedTextBrush}"
                                x:Name="CountText" />
                     <Button Grid.Column="2"
                             Style="{StaticResource FlatIconButtonStyle}"
@@ -54,24 +55,38 @@
             <Grid Grid.Row="1" Margin="12,8,12,4">
                 <TextBox x:Name="SearchBox"
                          Padding="6,4"
-                         BorderBrush="{StaticResource PanelBorderBrush}"
+                         BorderBrush="{DynamicResource PanelBorderBrush}"
                          BorderThickness="1"
-                         Background="{StaticResource PanelBackgroundBrush}"
-                         Foreground="{StaticResource PrimaryTextBrush}"
-                         CaretBrush="{StaticResource PrimaryTextBrush}"
+                         Background="{DynamicResource ControlBackgroundBrush}"
+                         Foreground="{DynamicResource PrimaryTextBrush}"
+                         CaretBrush="{DynamicResource PrimaryTextBrush}"
                          TextChanged="OnSearchTextChanged"
                          PreviewKeyDown="OnSearchKeyDown" />
                 <TextBlock x:Name="SearchHint"
                            Margin="9,0,0,0"
                            VerticalAlignment="Center"
                            IsHitTestVisible="False"
-                           Foreground="{StaticResource MutedTextBrush}"
+                           Foreground="{DynamicResource MutedTextBrush}"
                            Text="搜索文字内容或文件名" />
             </Grid>
 
+            <!-- 磁盘上限提示（D-09：只剩收藏仍超限时提示用户，不自动删除） -->
+            <Border x:Name="QuotaHint"
+                    Grid.Row="2"
+                    Margin="12,4,12,0"
+                    Padding="8,5"
+                    CornerRadius="4"
+                    Visibility="Collapsed"
+                    Background="{DynamicResource WarningBackgroundBrush}">
+                <TextBlock x:Name="QuotaHintText"
+                           TextWrapping="Wrap"
+                           FontSize="12"
+                           Foreground="{DynamicResource WarningTextBrush}" />
+            </Border>
+
             <!-- 记录列表：虚拟化 + 回收，保证数百条仍然流畅 -->
             <ListBox x:Name="ItemsList"
-                     Grid.Row="2"
+                     Grid.Row="3"
                      Background="Transparent"
                      BorderThickness="0"
                      Padding="0,4"
@@ -83,34 +98,52 @@
                      VirtualizingPanel.VirtualizationMode="Recycling"
                      ScrollViewer.CanContentScroll="True"
                      PreviewKeyDown="OnListPreviewKeyDown"
-                     PreviewMouseLeftButtonUp="OnListMouseLeftButtonUp">
+                     PreviewMouseLeftButtonUp="OnListMouseLeftButtonUp"
+                     PreviewMouseRightButtonDown="OnListMouseRightButtonDown"
+                     ContextMenuOpening="OnListContextMenuOpening">
+                <ListBox.ContextMenu>
+                    <ContextMenu Style="{StaticResource ClipContextMenuStyle}">
+                        <MenuItem x:Name="MenuPaste" Header="粘贴" Click="OnMenuPasteClick" />
+                        <MenuItem x:Name="MenuPin" Header="收藏" Click="OnMenuPinClick" />
+                        <Separator />
+                        <MenuItem x:Name="MenuDelete" Header="删除" Click="OnMenuDeleteClick" />
+                    </ContextMenu>
+                </ListBox.ContextMenu>
                 <ListBox.ItemTemplate>
                     <DataTemplate>
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
 
+                            <!-- 收藏标记 -->
+                            <TextBlock Grid.Column="0"
+                                       Margin="0,0,4,0"
+                                       VerticalAlignment="Top"
+                                       Foreground="{DynamicResource PinnedBrush}"
+                                       Text="{Binding PinGlyph}" />
+
                             <!-- 类型徽标 -->
-                            <Border Grid.Column="0"
+                            <Border Grid.Column="1"
                                     Margin="0,0,8,0"
                                     Padding="5,1"
                                     VerticalAlignment="Top"
                                     CornerRadius="3"
-                                    Background="{StaticResource BadgeBackgroundBrush}">
+                                    Background="{DynamicResource BadgeBackgroundBrush}">
                                 <TextBlock FontSize="11"
-                                           Foreground="{StaticResource MutedTextBrush}"
+                                           Foreground="{DynamicResource MutedTextBrush}"
                                            Text="{Binding TypeLabel}" />
                             </Border>
 
                             <!-- 图片缩略图（只有图片记录才显示） -->
-                            <Border Grid.Column="1"
+                            <Border Grid.Column="2"
                                     Margin="0,0,8,0"
                                     CornerRadius="3"
-                                    Background="{StaticResource BadgeBackgroundBrush}"
+                                    Background="{DynamicResource BadgeBackgroundBrush}"
                                     Visibility="{Binding HasThumbnail, Converter={StaticResource BooleanToVisibilityConverter}}">
                                 <Image Width="60"
                                        Height="60"
@@ -118,16 +151,16 @@
                                        Source="{Binding ThumbnailPath, Converter={StaticResource ThumbnailConverter}}" />
                             </Border>
 
-                            <TextBlock Grid.Column="2"
+                            <TextBlock Grid.Column="3"
                                        VerticalAlignment="Center"
                                        Text="{Binding DisplayText}"
-                                       Foreground="{StaticResource PrimaryTextBrush}"
+                                       Foreground="{DynamicResource PrimaryTextBrush}"
                                        TextTrimming="CharacterEllipsis"
                                        ToolTip="{Binding Tooltip}" />
-                            <TextBlock Grid.Column="3"
+                            <TextBlock Grid.Column="4"
                                        Margin="10,0,0,0"
                                        VerticalAlignment="Center"
-                                       Foreground="{StaticResource MutedTextBrush}"
+                                       Foreground="{DynamicResource MutedTextBrush}"
                                        FontSize="12"
                                        Text="{Binding TimeText}" />
                         </Grid>
@@ -137,18 +170,18 @@
 
             <!-- 空态提示 -->
             <TextBlock x:Name="EmptyHint"
-                       Grid.Row="2"
+                       Grid.Row="3"
                        HorizontalAlignment="Center"
                        VerticalAlignment="Center"
-                       Foreground="{StaticResource MutedTextBrush}"
+                       Foreground="{DynamicResource MutedTextBrush}"
                        Visibility="Collapsed"
                        TextAlignment="Center"
                        Text="还没有记录&#x0a;复制任意文字后会自动出现在这里" />
 
-            <Border Grid.Row="3" Background="{StaticResource HeaderBackgroundBrush}" Padding="12,6">
-                <TextBlock Foreground="{StaticResource MutedTextBrush}"
+            <Border Grid.Row="4" Background="{DynamicResource HeaderBackgroundBrush}" Padding="12,6">
+                <TextBlock Foreground="{DynamicResource MutedTextBrush}"
                            FontSize="12"
-                           Text="单击 / Enter 粘贴 · ↑↓ 选择 · Delete 删除 · Esc 关闭" />
+                           Text="单击 / Enter 粘贴 · ↑↓ 选择 · Delete 删除 · 右键收藏 · Esc 关闭" />
             </Border>
         </Grid>
     </Border>

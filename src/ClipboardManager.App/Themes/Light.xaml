@@ -1,0 +1,18 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!-- 浅色主题（默认）。所有颜色只在这里定义，控件通过 DynamicResource 引用，便于运行时整体替换。 -->
+    <SolidColorBrush x:Key="PanelBackgroundBrush" Color="#F8F5EE" />
+    <SolidColorBrush x:Key="HeaderBackgroundBrush" Color="#EFE9DD" />
+    <SolidColorBrush x:Key="PanelBorderBrush" Color="#DED5C4" />
+    <SolidColorBrush x:Key="PrimaryTextBrush" Color="#2A2621" />
+    <SolidColorBrush x:Key="MutedTextBrush" Color="#6F6558" />
+    <SolidColorBrush x:Key="AccentBrush" Color="#2F6FED" />
+    <SolidColorBrush x:Key="SelectionBrush" Color="#E3E9FA" />
+    <SolidColorBrush x:Key="HoverBrush" Color="#EAE4D8" />
+    <SolidColorBrush x:Key="BadgeBackgroundBrush" Color="#E5DED0" />
+    <SolidColorBrush x:Key="PinnedBrush" Color="#B57A16" />
+    <SolidColorBrush x:Key="WarningBackgroundBrush" Color="#FDF3D8" />
+    <SolidColorBrush x:Key="WarningTextBrush" Color="#7A5A12" />
+    <SolidColorBrush x:Key="MenuBackgroundBrush" Color="#FDFBF7" />
+    <SolidColorBrush x:Key="ControlBackgroundBrush" Color="#FFFFFF" />
+</ResourceDictionary>

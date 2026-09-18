@@ -22,8 +22,17 @@ public sealed class ClipboardAccess
     /// <summary>二进制格式（图片 / HTML）字节上限 32MB，超过直接拒绝记录。</summary>
     public const int MaxBinaryBytes = 32 * 1024 * 1024;
 
-    private const int MaxAttempts = 4;
-    private const int RetryDelayMs = 40;
+    /// <summary>
+    /// 打开剪贴板的重试预算：6 次 × 50ms（最坏约 300ms）。
+    /// <para>
+    /// 为什么给到 300ms：这条通知只来一次（同一序列号不会重放），读失败就等于永久丢一条记录，
+    /// 而剪贴板锁通常只被占用几十毫秒 —— 多等一会儿远好过丢数据。
+    /// 锁内不做慢操作的原则不受影响（等待发生在 OpenClipboard 之外）。
+    /// </para>
+    /// </summary>
+    private const int MaxAttempts = 6;
+
+    private const int RetryDelayMs = 50;
 
     private static readonly Lazy<uint> HtmlFormatId =
         new(() => NativeMethods.RegisterClipboardFormatW("HTML Format"));

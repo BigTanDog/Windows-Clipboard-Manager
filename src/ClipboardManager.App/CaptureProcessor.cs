@@ -32,7 +32,6 @@ internal sealed class CaptureProcessor
 {
     private readonly BlobStore _blobs;
     private readonly AppLog _log;
-    private readonly bool _captureImages;
 
     /// <summary>创建处理器。</summary>
     /// <param name="blobs">本体存储。</param>
@@ -42,8 +41,11 @@ internal sealed class CaptureProcessor
     {
         _blobs = blobs;
         _log = log;
-        _captureImages = captureImages;
+        CaptureImages = captureImages;
     }
+
+    /// <summary>设置项：是否记录图片（可在设置保存后热更新，无需重启）。</summary>
+    public bool CaptureImages { get; set; }
 
     /// <summary>
     /// 处理一个候选；返回 null 表示按规则应丢弃（原因已记日志）。
@@ -121,7 +123,7 @@ internal sealed class CaptureProcessor
 
     private ProcessedCapture? ProcessImage(ClipCandidate candidate)
     {
-        if (!_captureImages)
+        if (!CaptureImages)
         {
             _log.Diag("图片：设置项已关闭记录图片，忽略");
             return null;

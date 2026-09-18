@@ -6,24 +6,16 @@
     <!-- 注意：不设置 StartupUri —— 主窗口由 AppHost 按需创建与显示 -->
     <Application.Resources>
         <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <!-- 主题字典：启动时由 ThemeManager 按设置（system/light/dark）整体替换 -->
+                <ResourceDictionary Source="Themes/Light.xaml" />
+            </ResourceDictionary.MergedDictionaries>
 
             <!-- 缩略图惰性加载（配合列表虚拟化，只有可见行才解码；加载后不锁文件） -->
             <imaging:ThumbnailConverter x:Key="ThumbnailConverter" />
             <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
-            <SolidColorBrush x:Key="BadgeBackgroundBrush" Color="#E5DED0" />
 
-            <!-- 第一版配色（暖米白，与用户偏好一致）。深浅色跟随在阶段三接入，
-                 届时这些键会被主题字典整体替换；因此控件一律只引用这些键，不写死颜色。 -->
-            <SolidColorBrush x:Key="PanelBackgroundBrush" Color="#F8F5EE" />
-            <SolidColorBrush x:Key="HeaderBackgroundBrush" Color="#EFE9DD" />
-            <SolidColorBrush x:Key="PanelBorderBrush" Color="#DED5C4" />
-            <SolidColorBrush x:Key="PrimaryTextBrush" Color="#2A2621" />
-            <SolidColorBrush x:Key="MutedTextBrush" Color="#6F6558" />
-            <SolidColorBrush x:Key="AccentBrush" Color="#2F6FED" />
-            <SolidColorBrush x:Key="SelectionBrush" Color="#E3E9FA" />
-            <SolidColorBrush x:Key="HoverBrush" Color="#EAE4D8" />
-
-            <!-- 列表项样式：紧凑工具风（参考 Ditto 的信息密度） -->
+            <!-- 控件一律引用主题键，不写死颜色；用 DynamicResource 才能在运行时切换主题 -->
             <Style x:Key="ClipItemStyle" TargetType="ListBoxItem">
                 <Setter Property="Padding" Value="10,6" />
                 <Setter Property="HorizontalContentAlignment" Value="Stretch" />
@@ -41,10 +33,10 @@
                             </Border>
                             <ControlTemplate.Triggers>
                                 <Trigger Property="IsMouseOver" Value="True">
-                                    <Setter TargetName="Bd" Property="Background" Value="{StaticResource HoverBrush}" />
+                                    <Setter TargetName="Bd" Property="Background" Value="{DynamicResource HoverBrush}" />
                                 </Trigger>
                                 <Trigger Property="IsSelected" Value="True">
-                                    <Setter TargetName="Bd" Property="Background" Value="{StaticResource SelectionBrush}" />
+                                    <Setter TargetName="Bd" Property="Background" Value="{DynamicResource SelectionBrush}" />
                                 </Trigger>
                             </ControlTemplate.Triggers>
                         </ControlTemplate>
@@ -52,11 +44,11 @@
                 </Setter>
             </Style>
 
-            <!-- 无边框小按钮（关闭按钮用） -->
+            <!-- 无边框小按钮（关闭按钮 / 行内小按钮用） -->
             <Style x:Key="FlatIconButtonStyle" TargetType="Button">
                 <Setter Property="Background" Value="Transparent" />
                 <Setter Property="BorderThickness" Value="0" />
-                <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}" />
+                <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}" />
                 <Setter Property="Width" Value="28" />
                 <Setter Property="Height" Value="24" />
                 <Setter Property="Cursor" Value="Hand" />
@@ -68,7 +60,7 @@
                             </Border>
                             <ControlTemplate.Triggers>
                                 <Trigger Property="IsMouseOver" Value="True">
-                                    <Setter TargetName="Bd" Property="Background" Value="{StaticResource HoverBrush}" />
+                                    <Setter TargetName="Bd" Property="Background" Value="{DynamicResource HoverBrush}" />
                                 </Trigger>
                             </ControlTemplate.Triggers>
                         </ControlTemplate>
@@ -76,6 +68,25 @@
                 </Setter>
             </Style>
 
+            <!-- 普通按钮（设置窗口用） -->
+            <Style x:Key="DialogButtonStyle" TargetType="Button">
+                <Setter Property="MinWidth" Value="82" />
+                <Setter Property="Height" Value="30" />
+                <Setter Property="Margin" Value="6,0,0,0" />
+                <Setter Property="Cursor" Value="Hand" />
+                <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" />
+                <Setter Property="Background" Value="{DynamicResource ControlBackgroundBrush}" />
+                <Setter Property="BorderBrush" Value="{DynamicResource PanelBorderBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+            </Style>
+
+            <!-- 上下文菜单（面板右键：收藏 / 删除） -->
+            <Style x:Key="ClipContextMenuStyle" TargetType="ContextMenu">
+                <Setter Property="Background" Value="{DynamicResource MenuBackgroundBrush}" />
+                <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" />
+                <Setter Property="BorderBrush" Value="{DynamicResource PanelBorderBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+            </Style>
         </ResourceDictionary>
     </Application.Resources>
 </Application>

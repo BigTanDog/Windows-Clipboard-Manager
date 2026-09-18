@@ -19,6 +19,15 @@ public sealed class MessageWindow : IDisposable
     /// <summary>自定义消息偏移：后台线程请求 STA 线程执行剪贴板写回（见 <see cref="PostToSta"/>）。</summary>
     public const int MessageWriteClipboard = 1;
 
+    /// <summary>自定义消息偏移：托盘图标回调（<c>WM_APP + 2</c>）。</summary>
+    public const int MessageTrayCallback = 2;
+
+    /// <summary>资源管理器广播的 TaskbarCreated 消息号（运行时注册，0 表示未注册成功）。</summary>
+    private static uint _taskbarCreatedMessage;
+
+    /// <summary>托盘回调消息号（供 <see cref="TrayIcon"/> 注册时使用）。</summary>
+    public static uint TrayCallbackMessage => NativeMethods.WM_APP + MessageTrayCallback;
+
     /// <summary>
     /// 窗口过程委托。必须是 <b>静态字段</b> 持有 —— 委托实例被 GC 回收后，
     /// 系统回调会跳到已释放的地址并直接崩溃进程（Win32 互操作最经典的坑）。
@@ -48,6 +57,12 @@ public sealed class MessageWindow : IDisposable
     /// <summary>自定义消息（WM_APP + n，用于把后台线程的请求切回 STA 线程）。</summary>
     public event Action<int>? StaMessageReceived;
 
+    /// <summary>托盘图标回调：事件号（如 WM_LBUTTONUP）、鼠标 x、鼠标 y（物理像素）。</summary>
+    public event Action<uint, int, int>? TrayMessage;
+
+    /// <summary>资源管理器（任务栏）重启：必须重新添加托盘图标。</summary>
+    public event Action? TaskbarCreated;
+
     /// <summary>窗口句柄；未创建时为 <see cref="IntPtr.Zero"/>。</summary>
     public IntPtr Handle => _handle;
 
@@ -64,16 +79,26 @@ public sealed class MessageWindow : IDisposable
         var hInstance = NativeMethods.GetModuleHandleW(null);
         var className = EnsureClassRegistered(hInstance);
 
+        // 注册 TaskbarCreated 消息号（资源管理器重启时广播）：必须在收到消息前拿到，否则会漏掉那次重挂。
+        if (_taskbarCreatedMessage == 0)
+        {
+            _taskbarCreatedMessage = NativeMethods.RegisterWindowMessageW("TaskbarCreated");
+        }
+
         var handle = NativeMethods.CreateWindowExW(
-            dwExStyle: 0,
+            dwExStyle: (uint)NativeMethods.WS_EX_TOOLWINDOW, // 常量按 Get/SetWindowLongPtr 的用法声明为 long，这里转回 uint
             lpClassName: className,
             lpWindowName: "ClipboardManager.MessageWindow",
-            dwStyle: 0,
+            dwStyle: NativeMethods.WS_POPUP,
             x: 0,
             y: 0,
             nWidth: 0,
             nHeight: 0,
-            hWndParent: NativeMethods.HWND_MESSAGE,
+            // 关键决策：这里用「隐藏的顶层窗口」而不是 HWND_MESSAGE 的仅消息窗口。
+            // 原因（实测踩坑）：托盘菜单用 TrackPopupMenuEx 弹出，而它要求先把拥有者窗口设为前台
+            // （否则菜单会立刻消失）；message-only 窗口无法成为前台窗口，导致菜单根本弹不出来。
+            // 该窗口全程不调用 ShowWindow，用户永远看不到，也不会出现在 Alt+Tab（WS_EX_TOOLWINDOW）。
+            hWndParent: IntPtr.Zero,
             hMenu: IntPtr.Zero,
             hInstance: hInstance,
             lpParam: IntPtr.Zero);
@@ -212,7 +237,8 @@ public sealed class MessageWindow : IDisposable
         lock (LiveInstances)
         {
             if (msg is NativeMethods.WM_CLIPBOARDUPDATE or NativeMethods.WM_HOTKEY or NativeMethods.WM_SETTINGCHANGE
-                || (msg >= NativeMethods.WM_APP && msg < NativeMethods.WM_APP + 0x4000))
+                || (msg >= NativeMethods.WM_APP && msg < NativeMethods.WM_APP + 0x4000)
+                || (msg != 0 && msg == _taskbarCreatedMessage))
             {
                 LiveInstances.TryGetValue(hWnd, out instance);
             }
@@ -235,6 +261,20 @@ public sealed class MessageWindow : IDisposable
                     case NativeMethods.WM_SETTINGCHANGE:
                         instance.SystemSettingsChanged?.Invoke();
                         return IntPtr.Zero;
+
+                    case var _ when msg == _taskbarCreatedMessage:
+                        instance.TaskbarCreated?.Invoke();
+                        return IntPtr.Zero;
+                }
+
+                if (msg == NativeMethods.WM_APP + MessageTrayCallback)
+                {
+                    // v4 语义：lParam 低位是事件、高位是图标 id；坐标在 wParam（有符号 16 位打包）。
+                    instance.TrayMessage?.Invoke(
+                        Core.Ui.TrayNotification.ResolveEvent(lParam),
+                        Core.Ui.TrayNotification.ResolveX(wParam),
+                        Core.Ui.TrayNotification.ResolveY(wParam));
+                    return IntPtr.Zero;
                 }
 
                 if (msg >= NativeMethods.WM_APP && msg < NativeMethods.WM_APP + 0x4000)

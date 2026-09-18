@@ -48,6 +48,9 @@ public partial class PanelWindow : Window
     /// <summary>请求删除某条记录（Delete）。</summary>
     public event Action<ClipItem>? DeleteRequested;
 
+    /// <summary>请求切换收藏状态（右键菜单）。</summary>
+    public event Action<ClipItem>? PinToggleRequested;
+
     /// <summary>请求关闭面板（Esc / 关闭按钮）。</summary>
     public event Action? CloseRequested;
 
@@ -85,6 +88,16 @@ public partial class PanelWindow : Window
         }
     }
 
+    /// <summary>
+    /// 设置磁盘上限提示（D-09：只剩收藏仍超限时提示用户，不自动删除）。传 null 或空串即隐藏。
+    /// </summary>
+    /// <param name="message">提示文案。</param>
+    public void SetQuotaHint(string? message)
+    {
+        QuotaHintText.Text = message ?? string.Empty;
+        QuotaHint.Visibility = string.IsNullOrEmpty(message) ? Visibility.Collapsed : Visibility.Visible;
+    }
+
     /// <summary>把键盘焦点交给列表（面板弹出后调用）。</summary>
     public void FocusList() => ItemsList.Focus();
 
@@ -109,6 +122,60 @@ public partial class PanelWindow : Window
     private ClipItem? SelectedItem => (ItemsList.SelectedItem as ClipItemViewModel)?.Source;
 
     private void OnCloseButtonClick(object sender, RoutedEventArgs e) => CloseRequested?.Invoke();
+
+    /// <summary>
+    /// 右键按下时先选中光标下的条目。
+    /// 注意：ListBox 默认只有左键才改变选中项，不处理这里会出现「右键菜单操作的是上一条」的错位。
+    /// </summary>
+    private void OnListMouseRightButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.OriginalSource is not DependencyObject source)
+        {
+            return;
+        }
+
+        if (ItemsControl.ContainerFromElement(ItemsList, source) is ListBoxItem container)
+        {
+            container.IsSelected = true;
+        }
+    }
+
+    /// <summary>菜单弹出前按当前条目的收藏状态改写菜单文案。</summary>
+    private void OnListContextMenuOpening(object sender, ContextMenuEventArgs e)
+    {
+        var item = SelectedItem;
+        if (item is null)
+        {
+            e.Handled = true;
+            return;
+        }
+
+        MenuPin.Header = item.IsPinned ? "取消收藏" : "收藏";
+    }
+
+    private void OnMenuPasteClick(object sender, RoutedEventArgs e)
+    {
+        if (SelectedItem is { } item)
+        {
+            PasteRequested?.Invoke(item);
+        }
+    }
+
+    private void OnMenuPinClick(object sender, RoutedEventArgs e)
+    {
+        if (SelectedItem is { } item)
+        {
+            PinToggleRequested?.Invoke(item);
+        }
+    }
+
+    private void OnMenuDeleteClick(object sender, RoutedEventArgs e)
+    {
+        if (SelectedItem is { } item)
+        {
+            DeleteRequested?.Invoke(item);
+        }
+    }
 
     private void OnSearchTextChanged(object sender, TextChangedEventArgs e)
     {

@@ -1,3 +1,5 @@
+using ClipboardManager.Core.AutoStart;
+
 namespace ClipboardManager.Core.Settings;
 
 /// <summary>
@@ -40,6 +42,9 @@ public sealed record AppSettings
 
     /// <summary>是否开机自启（写 HKCU Run）。</summary>
     public bool AutoStart { get; init; }
+
+    /// <summary>开机自启的延迟秒数（0 = 不延迟；需求 §3.5「可选延迟启动，避免拖慢开机」）。</summary>
+    public int AutoStartDelaySeconds { get; init; }
 
     /// <summary>排除的应用（进程名，不含路径）。</summary>
     public IReadOnlyList<string> ExcludedApps { get; init; } = [];
@@ -84,6 +89,7 @@ public sealed record AppSettings
             && string.Equals(Hotkey, other.Hotkey, StringComparison.Ordinal)
             && AutoPaste == other.AutoPaste
             && AutoStart == other.AutoStart
+            && AutoStartDelaySeconds == other.AutoStartDelaySeconds
             && ExcludeByProcessName == other.ExcludeByProcessName
             && CaptureImages == other.CaptureImages
             && string.Equals(Theme, other.Theme, StringComparison.Ordinal)
@@ -101,6 +107,7 @@ public sealed record AppSettings
         hash.Add(Hotkey, StringComparer.Ordinal);
         hash.Add(AutoPaste);
         hash.Add(AutoStart);
+        hash.Add(AutoStartDelaySeconds);
         hash.Add(ExcludeByProcessName);
         hash.Add(CaptureImages);
         hash.Add(Theme, StringComparer.Ordinal);
@@ -132,6 +139,7 @@ public sealed record AppSettings
             DiskQuotaMb = NormalizeOption(DiskQuotaMb, DiskQuotaMbOptions, DefaultDiskQuotaMb),
             Hotkey = string.IsNullOrWhiteSpace(Hotkey) ? DefaultHotkey : Hotkey.Trim(),
             Theme = theme,
+            AutoStartDelaySeconds = Math.Clamp(AutoStartDelaySeconds, 0, AutoStartCommand.MaxDelaySeconds),
             ExcludedApps = ExcludedApps?
                 .Where(static x => !string.IsNullOrWhiteSpace(x))
                 .Select(static x => x.Trim())

@@ -35,6 +35,7 @@ public sealed class ClipItemViewModel
         TimeText = RelativeTime.Format(source.UpdatedAt, now);
         ThumbnailPath = thumbnailPath;
         HasThumbnail = !string.IsNullOrEmpty(thumbnailPath);
+        IsPinned = source.IsPinned;
 
         // 搜索命中时展示命中附近的片段（仍要脱敏），否则展示摘要。
         var display = string.IsNullOrWhiteSpace(searchQuery)
@@ -65,4 +66,10 @@ public sealed class ClipItemViewModel
 
     /// <summary>是否有缩略图。</summary>
     public bool HasThumbnail { get; }
+
+    /// <summary>是否已收藏（收藏项永不自动淘汰，需求 §3.3）。</summary>
+    public bool IsPinned { get; }
+
+    /// <summary>收藏标记文字（收藏时显示 ★，否则为空以保持紧凑）。</summary>
+    public string PinGlyph => IsPinned ? "★" : string.Empty;
 }

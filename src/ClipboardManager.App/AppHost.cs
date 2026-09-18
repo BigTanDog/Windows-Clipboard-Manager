@@ -3,10 +3,14 @@ using System.IO;
 using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Threading;
+using ClipboardManager.App.Imaging;
+using ClipboardManager.App.Theme;
 using ClipboardManager.App.ViewModels;
+using ClipboardManager.Core.AutoStart;
 using ClipboardManager.Core.Clipboard;
 using ClipboardManager.Core.Hotkeys;
 using ClipboardManager.Core.Models;
+using ClipboardManager.Core.Retention;
 using ClipboardManager.Core.Sensitive;
 using ClipboardManager.Core.Settings;
 using ClipboardManager.Core.Ui;
@@ -48,11 +52,13 @@ internal sealed class AppHost : IDisposable
     private HotkeyManager? _hotkeys;
     private PanelWindow? _panel;
     private PasteService? _paste;
+    private TrayIcon? _tray;
     private DispatcherTimer? _autoExitTimer;
     private DispatcherTimer? _panelWarmup;
     private IntPtr _previousForeground;
     private long _lastProcessedSequence = -1;
     private string _query = string.Empty;
+    private string? _quotaWarning;
     private bool _disposed;
 
     /// <summary>创建宿主。</summary>
@@ -93,6 +99,7 @@ internal sealed class AppHost : IDisposable
         // 退出顺序（技术设计 §2.2）：注销热键 → 注销监听 → 销毁消息窗口 → 释放数据库。
         try
         {
+            _tray?.Dispose();
             _hotkeys?.Dispose();
             _messageWindow?.StopClipboardListening();
             _messageWindow?.Dispose();
@@ -134,6 +141,10 @@ internal sealed class AppHost : IDisposable
 
         _masker = _settings.MaskSensitiveData ? new SensitiveMasker(true) : SensitiveMasker.Disabled;
 
+        // 主题尽早应用：在任何窗口创建之前完成，避免出现"先亮后暗"的闪烁。
+        var theme = ThemeManager.ApplyFromSetting(_settings.Theme);
+        _log.Diag($"主题已应用：设置={_settings.Theme} 实际={theme}");
+
         // 启动时清理孤儿本体文件（此时没有在途写入，安全）。
         CleanOrphanBlobsAsync();
 
@@ -141,6 +152,9 @@ internal sealed class AppHost : IDisposable
         _messageWindow.Create();
         _messageWindow.ClipboardUpdated += OnClipboardUpdated;
         _messageWindow.HotkeyPressed += TogglePanel;
+        _messageWindow.TrayMessage += OnTrayMessage;
+        _messageWindow.TaskbarCreated += OnTaskbarCreated;
+        _messageWindow.SystemSettingsChanged += OnSystemSettingsChanged;
 
         _clipboard = new ClipboardAccess(_messageWindow.Handle);
         _paste = new PasteService(_clipboard, _selfWrite, _blobs, _log);
@@ -177,6 +191,9 @@ internal sealed class AppHost : IDisposable
         }
 
         _log.Info($"READY elapsedMs={_uptime.Elapsed.TotalMilliseconds:F0}");
+
+        // 托盘图标：常驻通知区（需求 §3.5）。放在 READY 之后，避免拖慢冷启动指标。
+        TryCreateTrayIcon();
 
         // 预热：READY 之后再创建面板窗口。
         // 实测依据：启动时创建窗口会让冷启动从 233ms 涨到 497ms，但不创建则首次弹出要多花 ~100ms。
@@ -420,6 +437,8 @@ internal sealed class AppHost : IDisposable
         panel.DeleteRequested += OnDeleteRequested;
         panel.CloseRequested += HidePanel;
         panel.SearchRequested += OnSearchRequested;
+        panel.PinToggleRequested += OnPinToggleRequested;
+        panel.SetQuotaHint(_quotaWarning);
 
         // 立即创建 HWND：让 WS_EX_TOOLWINDOW 在显示前生效，并让首次 Show() 更快。
         _ = new WindowInteropHelper(panel).EnsureHandle();
@@ -549,6 +568,97 @@ internal sealed class AppHost : IDisposable
         }
     }
 
+    /// <summary>
+    /// 执行淘汰（需求 §3.3 + D-09）：先按条数上限、再按磁盘上限；两步都遵循
+    /// 「非收藏优先淘汰、收藏永不自动删除」，只剩收藏仍超限时改为提示用户。
+    /// </summary>
+    private void ApplyRetention(int maxItems)
+    {
+        var repository = _repository!;
+
+        var byCount = repository.EnforceMaxItems(maxItems);
+        if (byCount.RemovedCount > 0)
+        {
+            _log.Diag($"条数上限淘汰 {byCount.RemovedCount} 条");
+            foreach (var blobPath in byCount.BlobPaths)
+            {
+                DeleteBlobFiles(blobPath);
+            }
+        }
+
+        var quotaMb = _settings.DiskQuotaMb;
+        if (quotaMb < 0)
+        {
+            UpdateQuotaWarning(null);
+            return;
+        }
+
+        var plan = RetentionPlanner.PlanByDiskQuota(
+            repository.GetRetentionCandidates(),
+            (long)quotaMb * 1024 * 1024);
+
+        if (plan.EvictIds.Count > 0)
+        {
+            var blobPaths = repository.DeleteMany(plan.EvictIds);
+            _log.Diag($"磁盘上限淘汰 {plan.EvictIds.Count} 条（合计 {FormatMegabytes(plan.TotalBytes)}）");
+            foreach (var blobPath in blobPaths)
+            {
+                DeleteBlobFiles(blobPath);
+            }
+        }
+
+        UpdateQuotaWarning(
+            plan.OverQuotaAfterEviction
+                ? $"收藏已占用 {FormatMegabytes(plan.PinnedBytes)}，超过磁盘上限 {quotaMb}MB。收藏不会被自动删除，请手动清理。"
+                : null);
+    }
+
+    private void UpdateQuotaWarning(string? message)
+    {
+        if (string.Equals(_quotaWarning, message, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _quotaWarning = message;
+        var panel = _panel;
+        if (panel is not null)
+        {
+            _ = _dispatcher.BeginInvoke(() => panel.SetQuotaHint(message), DispatcherPriority.Background);
+        }
+    }
+
+    private static string FormatMegabytes(long bytes) =>
+        bytes >= 1024L * 1024 * 1024
+            ? $"{bytes / (1024.0 * 1024 * 1024):0.#} GB"
+            : $"{bytes / (1024.0 * 1024):0.#} MB";
+
+    /// <summary>右键菜单切换收藏（需求 §3.3：收藏项永不参与自动淘汰）。</summary>
+    private void OnPinToggleRequested(ClipItem item)
+    {
+        _ = Task.Run(async () =>
+        {
+            await _backgroundGate.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                var pinned = !item.IsPinned;
+                var changed = _repository!.SetPinned(item.Id, pinned);
+                _log.Diag($"收藏切换 id={item.Id} → {pinned}（生效={changed}）");
+
+                var items = QueryItems();
+                _ = _dispatcher.BeginInvoke(() => ApplyItems(items), DispatcherPriority.Background);
+            }
+            catch (Exception ex)
+            {
+                _log.Error("切换收藏状态失败", ex);
+            }
+            finally
+            {
+                _backgroundGate.Release();
+            }
+        });
+    }
+
     private void OnDeleteRequested(ClipItem item)
     {
         _ = Task.Run(async () =>
@@ -577,6 +687,351 @@ internal sealed class AppHost : IDisposable
                 _backgroundGate.Release();
             }
         });
+    }
+
+    // ────────────────────── 托盘（需求 §3.5） ──────────────────────
+
+    private const int TrayCommandShowPanel = 1;
+    private const int TrayCommandSettings = 2;
+    private const int TrayCommandClearHistory = 3;
+    private const int TrayCommandToggleAutoStart = 4;
+    private const int TrayCommandExit = 5;
+
+    private const uint WmContextMenu = 0x007B;
+    private const uint WmLButtonUp = 0x0202;
+    private const uint WmLButtonDblClk = 0x0203;
+    private const uint WmRButtonUp = 0x0205;
+
+    /// <summary>创建托盘图标（READY 之后调用；资源管理器重启后也要重新创建）。</summary>
+    private void TryCreateTrayIcon()
+    {
+        try
+        {
+            var tray = _tray ??= new TrayIcon(_messageWindow!.Handle, MessageWindow.TrayCallbackMessage);
+            var tooltip = $"剪贴板管理器 · {_settings.Hotkey}";
+
+            if (!tray.TryAddFromIco(TrayIconImage.BuildIco(), tooltip, out var error))
+            {
+                _log.Error("创建托盘图标失败：" + error);
+                return;
+            }
+
+            _log.Info("托盘图标已创建");
+        }
+        catch (Exception ex)
+        {
+            _log.Error("创建托盘图标异常", ex);
+        }
+    }
+
+    /// <summary>资源管理器重启后托盘会被清空，必须重建（否则图标永久消失）。</summary>
+    private void OnTaskbarCreated()
+    {
+        _log.Info("检测到资源管理器重启，重建托盘图标");
+
+        // 旧句柄已随旧任务栏失效：释放后重新创建，避免 HICON 泄漏。
+        _tray?.Dispose();
+        _tray = null;
+        TryCreateTrayIcon();
+    }
+
+    /// <summary>系统设置变化：跟随系统主题时立即重新解析（需求 §2 深浅色跟随）。</summary>
+    private void OnSystemSettingsChanged()
+    {
+        if (!string.Equals(_settings.Theme, Core.Theme.ThemeResolver.System, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var theme = ThemeManager.ApplyFromSetting(_settings.Theme);
+        _log.Diag($"系统主题变化，重新应用：{theme}");
+    }
+
+    private void OnTrayMessage(uint eventId, int x, int y)
+    {
+        _log.Diag($"托盘回调 | 事件=0x{eventId:X4} 坐标={x},{y}");
+
+        switch (eventId)
+        {
+            // v4 语义下右键菜单事件是 WM_CONTEXTMENU，鼠标消息才是 WM_RBUTTONUP，两个都要接。
+            case WmContextMenu:
+            case WmRButtonUp:
+                ShowTrayMenu(x, y);
+                break;
+
+            case WmLButtonUp:
+            case WmLButtonDblClk:
+                ShowPanel();
+                break;
+
+            default:
+                break;
+        }
+    }
+
+    private void ShowTrayMenu(int x, int y)
+    {
+        var tray = _tray;
+        if (tray is null)
+        {
+            return;
+        }
+
+        var autoStartEnabled = AutoStartRegistry.IsEnabledWith(BuildAutoStartCommand(_settings));
+
+        TrayMenuItem[] items =
+        [
+            new(TrayCommandShowPanel, "显示面板"),
+            new(TrayCommandSettings, "设置…"),
+            new(TrayCommandClearHistory, "清空历史…"),
+            TrayMenuItem.Separator,
+            new(TrayCommandToggleAutoStart, "开机自启", Checked: autoStartEnabled),
+            TrayMenuItem.Separator,
+            new(TrayCommandExit, "退出"),
+        ];
+
+        int command;
+        try
+        {
+            _log.Diag($"弹出托盘菜单（{items.Length} 项）…");
+            command = tray.ShowMenu(items, x, y);
+            _log.Diag($"托盘菜单返回命令={command}");
+        }
+        catch (Exception ex)
+        {
+            _log.Error("显示托盘菜单失败", ex);
+            return;
+        }
+
+        HandleTrayCommand(command);
+    }
+
+    private void HandleTrayCommand(int command)
+    {
+        switch (command)
+        {
+            case TrayCommandShowPanel:
+                ShowPanel();
+                break;
+
+            case TrayCommandSettings:
+                ShowSettingsDialog();
+                break;
+
+            case TrayCommandClearHistory:
+                ClearHistoryWithConfirm();
+                break;
+
+            case TrayCommandToggleAutoStart:
+                ApplySettings(_settings with { AutoStart = !AutoStartRegistry.IsEnabledWith(BuildAutoStartCommand(_settings)) });
+                break;
+
+            case TrayCommandExit:
+                _log.Info("用户从托盘菜单退出");
+                Application.Current.Shutdown();
+                break;
+
+            default:
+                break;
+        }
+    }
+
+    private static string BuildAutoStartCommand(AppSettings settings) =>
+        AutoStartCommand.Build(AppPaths.ProcessPath ?? AppPaths.ProgramDirectory, settings.AutoStartDelaySeconds);
+
+    /// <summary>一键清空（需求 §3.3：必须二次确认）。</summary>
+    private void ClearHistoryWithConfirm()
+    {
+        var count = _repository?.CountAll() ?? 0;
+        if (count == 0)
+        {
+            return;
+        }
+
+        var answer = MessageBox.Show(
+            $"确定要清空全部 {count} 条历史记录吗？\n收藏的记录也会被删除，且无法恢复。",
+            "剪贴板管理器",
+            MessageBoxButton.OKCancel,
+            MessageBoxImage.Warning,
+            MessageBoxResult.Cancel);
+
+        if (answer != MessageBoxResult.OK)
+        {
+            return;
+        }
+
+        _ = Task.Run(async () =>
+        {
+            await _backgroundGate.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                var removed = _repository!.DeleteAll();
+
+                // 记录已清空 → 所有本体文件都成了孤儿，直接在启动时的同一套 GC 逻辑里清掉。
+                var orphans = _blobs!.CollectOrphans([]);
+                _log.Info($"已清空历史：{removed} 条，清理本体文件 {orphans} 个");
+
+                UpdateQuotaWarning(null);
+                var items = QueryItems();
+                _ = _dispatcher.BeginInvoke(() => ApplyItems(items), DispatcherPriority.Background);
+            }
+            catch (Exception ex)
+            {
+                _log.Error("清空历史失败", ex);
+            }
+            finally
+            {
+                _backgroundGate.Release();
+            }
+        });
+    }
+
+    /// <summary>打开设置窗口；保存后统一由 <see cref="ApplySettings"/> 生效并落盘。</summary>
+    private void ShowSettingsDialog()
+    {
+        try
+        {
+            var window = new SettingsWindow(_settings);
+            _ = window.ShowDialog();
+
+            if (window.Result is { } updated)
+            {
+                ApplySettings(updated);
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.Error("打开设置窗口失败", ex);
+        }
+    }
+
+    /// <summary>
+    /// 应用新设置：落盘 + 逐项生效（热键重注册、脱敏开关、图片记录、主题、开机自启、淘汰上限）。
+    /// </summary>
+    /// <param name="updated">新设置。</param>
+    private void ApplySettings(AppSettings updated)
+    {
+        ArgumentNullException.ThrowIfNull(updated);
+
+        var previous = _settings;
+        _settings = updated.Normalize();
+        if (_settingsStore is not null && !_settingsStore.TrySave(_settings, out var saveError))
+        {
+            _log.Error("设置保存失败：" + saveError);
+        }
+
+        _log.Info(
+            $"设置已更新 | maxItems={_settings.MaxItems} diskQuotaMb={_settings.DiskQuotaMb} hotkey={_settings.Hotkey} "
+            + $"autoStart={_settings.AutoStart}({_settings.AutoStartDelaySeconds}s) captureImages={_settings.CaptureImages} "
+            + $"maskSensitive={_settings.MaskSensitiveData} theme={_settings.Theme}");
+
+        // 1) 脱敏开关（D-13）
+        _masker = _settings.MaskSensitiveData ? new SensitiveMasker(true) : SensitiveMasker.Disabled;
+
+        // 2) 图片记录开关
+        if (_processor is not null)
+        {
+            _processor.CaptureImages = _settings.CaptureImages;
+        }
+
+        // 3) 主题
+        _ = ThemeManager.ApplyFromSetting(_settings.Theme);
+
+        // 4) 开机自启
+        ApplyAutoStart(_settings);
+
+        // 5) 热键（仅在变化时重注册，避免无谓的中断）
+        if (!string.Equals(previous.Hotkey, _settings.Hotkey, StringComparison.Ordinal))
+        {
+            ReRegisterHotkey(_settings.Hotkey);
+        }
+
+        // 6) 托盘提示里的热键文案同步
+        _tray?.UpdateTooltip($"剪贴板管理器 · {_settings.Hotkey}");
+
+        // 7) 上限变化立即生效（可能触发淘汰），并刷新列表让脱敏开关立刻可见
+        _ = Task.Run(async () =>
+        {
+            await _backgroundGate.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                ApplyRetention(_settings.MaxItems);
+                var items = QueryItems();
+                _ = _dispatcher.BeginInvoke(() => ApplyItems(items), DispatcherPriority.Background);
+            }
+            catch (Exception ex)
+            {
+                _log.Error("应用上限设置失败", ex);
+            }
+            finally
+            {
+                _backgroundGate.Release();
+            }
+        });
+    }
+
+    private void ReRegisterHotkey(string hotkey)
+    {
+        if (_hotkeys is null)
+        {
+            return;
+        }
+
+        if (!HotkeySpec.TryParse(hotkey, out var spec, out var parseError) || spec is null)
+        {
+            _log.Error($"热键配置无效：{parseError}");
+            return;
+        }
+
+        if (_hotkeys.TryRegister(spec, out var registerError))
+        {
+            _log.Info($"热键已更新：{spec}");
+            return;
+        }
+
+        _log.Error(registerError ?? "注册新热键失败");
+        if (_interactive)
+        {
+            MessageBox.Show(
+                registerError ?? "注册热键失败",
+                "剪贴板管理器",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+        }
+    }
+
+    /// <summary>写入或删除 HKCU 自启项（需求 §3.5）。</summary>
+    private void ApplyAutoStart(AppSettings settings)
+    {
+        if (settings.AutoStart)
+        {
+            var command = BuildAutoStartCommand(settings);
+            if (!AutoStartRegistry.TrySet(command, out var error))
+            {
+                _log.Error("设置开机自启失败：" + error);
+                if (_interactive)
+                {
+                    MessageBox.Show(
+                        $"设置开机自启失败：{error}",
+                        "剪贴板管理器",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Warning);
+                }
+
+                return;
+            }
+
+            _log.Info($"已设置开机自启：{command}");
+            return;
+        }
+
+        if (!AutoStartRegistry.TryRemove(out var removeError))
+        {
+            _log.Error("取消开机自启失败：" + removeError);
+            return;
+        }
+
+        _log.Info("已取消开机自启");
     }
 
     /// <summary>删除本体文件与缩略图（幂等）。</summary>
