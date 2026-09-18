@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.IO;
 using System.Windows;
 using System.Windows.Interop;
@@ -446,6 +446,7 @@ internal sealed class AppHost : IDisposable
         panel.SetQuotaHint(_quotaWarning);
         panel.Icon = Imaging.AppIcon.TryLoadImageSource();
         panel.HideOnClickOutside = _settings.HideOnClickOutside;
+        panel.SingleClickPaste = _settings.SingleClickPaste;
 
         // 立即创建 HWND：让 WS_EX_TOOLWINDOW 在显示前生效，并让首次 Show() 更快。
         _ = new WindowInteropHelper(panel).EnsureHandle();
@@ -1032,6 +1033,7 @@ internal sealed class AppHost : IDisposable
         if (_panel is not null)
         {
             _panel.HideOnClickOutside = _settings.HideOnClickOutside;
+            _panel.SingleClickPaste = _settings.SingleClickPaste;
         }
 
         ApplyPanelAppearance();

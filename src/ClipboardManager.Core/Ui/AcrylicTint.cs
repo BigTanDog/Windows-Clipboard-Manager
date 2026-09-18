@@ -16,8 +16,14 @@ public static class AcrylicTint
     /// <summary>强度上限（百分比）。</summary>
     public const int MaxStrength = 100;
 
-    /// <summary>强度上限时仍保留的最低保底不透明度（百分比）。</summary>
-    public const int MinOpacityPercent = 45;
+    /// <summary>
+    /// 强度上限时仍保留的最低保保不透明度（百分比）。
+    /// <para>
+    /// 2026-09-19 由 45% 下调到 30%：改用真正会模糊的 accent 3 之后，底色更透才能看出磨砂效果
+    /// （用户反馈"模糊强度太低"）；文字可读性由用户在滑杆上自行权衡。
+    /// </para>
+    /// </summary>
+    public const int MinOpacityPercent = 30;
 
     /// <summary>把任意输入收敛到 0–100。</summary>
     public static int Normalize(int strength) => Math.Clamp(strength, 0, MaxStrength);

@@ -73,6 +73,15 @@ public sealed record AppSettings
     /// </summary>
     public int AcrylicStrength { get; init; }
 
+    /// <summary>
+    /// 单击条目是否直接粘贴并收起面板。
+    /// <para>
+    /// 默认 <c>false</c>：<b>单击只选中</b>，粘贴交给双击或 <c>Enter</c> —— 避免"只想选中看看"时
+    /// 面板被立刻收起（用户反馈）；设为 <c>true</c> 恢复原来的单击即粘贴行为。
+    /// </para>
+    /// </summary>
+    public bool SingleClickPaste { get; init; }
+
     /// <summary>默认设置。</summary>
     public static AppSettings Default { get; } = new();
 
@@ -108,6 +117,7 @@ public sealed record AppSettings
             && MaskSensitiveData == other.MaskSensitiveData
             && HideOnClickOutside == other.HideOnClickOutside
             && AcrylicStrength == other.AcrylicStrength
+            && SingleClickPaste == other.SingleClickPaste
             && ExcludedApps.SequenceEqual(other.ExcludedApps, StringComparer.OrdinalIgnoreCase);
     }
 
@@ -128,6 +138,7 @@ public sealed record AppSettings
         hash.Add(MaskSensitiveData);
         hash.Add(HideOnClickOutside);
         hash.Add(AcrylicStrength);
+        hash.Add(SingleClickPaste);
         foreach (var app in ExcludedApps)
         {
             hash.Add(app, StringComparer.OrdinalIgnoreCase);

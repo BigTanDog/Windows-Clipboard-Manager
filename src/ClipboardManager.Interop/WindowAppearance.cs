@@ -46,8 +46,16 @@ public static class WindowAppearance
     /// <summary>策略值：不使用合成（恢复成普通不透明窗口）。</summary>
     private const int AccentDisabled = 0;
 
-    /// <summary>策略值：亚克力（模糊 + 染色）。</summary>
-    private const int AccentEnableAcrylicBlurBehind = 4;
+    /// <summary>
+    /// 策略值：模糊背景（Win10 起的老接口，<b>实测在 Windows 11 上才是真模糊</b>）。
+    /// <para>
+    /// 为什么不选 <c>ACCENT_ENABLE_ACRYLICBLURBEHIND(4)</c>：2026-09-19 在本机用「黑白条纹背景 +
+    /// 面板区域亮度标准差」实测，accent 4 的标准差与无模糊时几乎相同（84.99 vs 基线 84.52，等于没模糊，
+    /// 只有染色），而 accent 3 把标准差压到 33.16 —— 是货真价实的模糊。用户也反馈"模糊强度太低"，
+    /// 因此改用 accent 3。
+    /// </para>
+    /// </summary>
+    private const int AccentEnableBlurBehind = 3;
 
     /// <summary>
     /// 应用或关闭亚克力背景（附加项 B-04）。
@@ -72,7 +80,7 @@ public static class WindowAppearance
         var enabled = AcrylicTint.IsEnabled(strength);
         var policy = new ACCENTPOLICY
         {
-            AccentState = enabled ? AccentEnableAcrylicBlurBehind : AccentDisabled,
+            AccentState = enabled ? AccentEnableBlurBehind : AccentDisabled,
 
             // 社区约定值 2：让模糊区域覆盖整个窗口客户区（而不是只覆盖标题栏）
             AccentFlags = 2,

@@ -74,6 +74,7 @@ public partial class SettingsWindow : Window
         MaskBox.IsChecked = current.MaskSensitiveData;
         ExcludeByProcessBox.IsChecked = current.ExcludeByProcessName;
         HideOnClickOutsideBox.IsChecked = current.HideOnClickOutside;
+        SingleClickPasteBox.IsChecked = current.SingleClickPaste;
         HotkeyBox.Text = current.Hotkey;
         AcrylicSlider.Value = current.AcrylicStrength;
 
@@ -298,6 +299,7 @@ public partial class SettingsWindow : Window
             Theme = theme,
             MaskSensitiveData = MaskBox.IsChecked == true,
             HideOnClickOutside = HideOnClickOutsideBox.IsChecked == true,
+            SingleClickPaste = SingleClickPasteBox.IsChecked == true,
             AcrylicStrength = (int)Math.Round(AcrylicSlider.Value),
         }.Normalize();
 

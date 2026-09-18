@@ -3,7 +3,7 @@
 
 $root = Split-Path $PSScriptRoot -Parent
 $project = Join-Path $root 'src/ClipboardManager.App/ClipboardManager.App.csproj'
-$output = Join-Path $root 'artifacts/publish-fd'
+$output = Join-Path $root 'artifacts/小体积-需装运行时'
 
 # 注意：单文件压缩（EnableCompressionInSingleFile）只支持自包含发布，
 # 框架依赖形态不能启用（SDK 报 NETSDK1176），也不需要 —— 依赖由目标机运行时提供。

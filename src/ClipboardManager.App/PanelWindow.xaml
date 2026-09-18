@@ -108,6 +108,7 @@
                      ScrollViewer.CanContentScroll="True"
                      PreviewKeyDown="OnListPreviewKeyDown"
                      PreviewMouseLeftButtonUp="OnListMouseLeftButtonUp"
+                     MouseDoubleClick="OnListMouseDoubleClick"
                      PreviewMouseRightButtonDown="OnListMouseRightButtonDown"
                      ContextMenuOpening="OnListContextMenuOpening">
                 <ListBox.ContextMenu>
@@ -191,12 +192,13 @@
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
-                    <TextBlock Grid.Column="0"
+                    <TextBlock x:Name="HintText"
+                               Grid.Column="0"
                                VerticalAlignment="Center"
                                Foreground="{DynamicResource MutedTextBrush}"
                                FontSize="12"
                                TextTrimming="CharacterEllipsis"
-                               Text="单击 / Enter 粘贴 · ↑↓ 选择 · Delete 删除 · 右键收藏 · Esc 关闭" />
+                               Text="单击选中 · 双击 / Enter 粘贴 · ↑↓ 选择 · Delete 删除 · Esc 关闭" />
                     <!-- 齿轮：直接打开设置窗口（省得去托盘右键） -->
                     <Button x:Name="SettingsButton"
                             Grid.Column="1"

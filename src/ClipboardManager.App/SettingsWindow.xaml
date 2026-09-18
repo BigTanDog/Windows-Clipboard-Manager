@@ -117,6 +117,14 @@
                 <CheckBox x:Name="HideOnClickOutsideBox"
                           Margin="0,0,0,8"
                           Content="点击面板外部时自动隐藏" />
+                <CheckBox x:Name="SingleClickPasteBox"
+                          Margin="0,0,0,4"
+                          Content="单击条目即粘贴并收起面板" />
+                <TextBlock Margin="24,0,0,8"
+                           TextWrapping="Wrap"
+                           FontSize="12"
+                           Foreground="{DynamicResource MutedTextBrush}"
+                           Text="默认关闭：单击只选中，双击或 Enter 粘贴（避免想选中看看时面板被收起）。" />
                 <Grid Margin="0,0,0,4">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="150" />

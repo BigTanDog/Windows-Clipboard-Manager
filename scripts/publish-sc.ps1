@@ -3,7 +3,7 @@
 
 $root = Split-Path $PSScriptRoot -Parent
 $project = Join-Path $root 'src/ClipboardManager.App/ClipboardManager.App.csproj'
-$output = Join-Path $root 'artifacts/publish-sc'
+$output = Join-Path $root 'artifacts/大体积-免运行时'
 
 & $DotnetExe publish $project -c Release -r win-x64 --self-contained true `
     -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true `

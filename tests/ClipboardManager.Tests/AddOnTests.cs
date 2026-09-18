@@ -55,14 +55,14 @@ public sealed class AddOnTests : IDisposable
 
     [Theory]
     [InlineData(0, 100)]   // 关闭时完全不透明
-    [InlineData(50, 72)]   // 半强度：保留 72% 底色
-    [InlineData(100, 45)]  // 拉满也保留最低可读性
+    [InlineData(50, 65)]   // 半强度：保留 65% 底色
+    [InlineData(100, 30)]  // 拉满仍保留最低可读底限（30%）
     public void 强度映射为底色不透明度(int strength, int expectedPercent) =>
         Assert.Equal(expectedPercent, AcrylicTint.OpacityPercent(strength));
 
     [Theory]
     [InlineData(0, 255)]
-    [InlineData(100, 115)]
+    [InlineData(100, 76)]   // 255 × 30% = 76.5，Math.Round 用银行家舍入取偶 → 76
     public void 不透明度映射为_alpha_字节(int strength, int expectedAlpha) =>
         Assert.Equal(expectedAlpha, AcrylicTint.AlphaByte(strength));
 

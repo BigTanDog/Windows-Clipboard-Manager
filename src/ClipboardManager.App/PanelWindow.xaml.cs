@@ -28,6 +28,7 @@ public partial class PanelWindow : Window
     private readonly ObservableCollection<ClipItemViewModel> _items = [];
     private readonly DispatcherTimer _searchDebounce;
     private bool _contextMenuOpen;
+    private bool _singleClickPaste;
 
     /// <summary>创建面板。</summary>
     public PanelWindow()
@@ -51,6 +52,20 @@ public partial class PanelWindow : Window
 
     /// <summary>是否在失去激活（点击面板外部）时自动隐藏（附加项 B-01，由宿主按设置同步）。</summary>
     public bool HideOnClickOutside { get; set; } = true;
+
+    /// <summary>
+    /// 单击条目是否直接粘贴（并收起面板）。
+    /// <para>默认 false：单击只选中，粘贴交给双击或 Enter；由宿主按设置同步，切换时同步更新底部提示文案。</para>
+    /// </summary>
+    public bool SingleClickPaste
+    {
+        get => _singleClickPaste;
+        set
+        {
+            _singleClickPaste = value;
+            UpdateClickHint();
+        }
+    }
 
     /// <summary>
     /// 应用亚克力底色（附加项 B-04）。
@@ -323,6 +338,45 @@ public partial class PanelWindow : Window
         }
 
         ItemsList.SelectedItem = viewModel;
+
+        // 默认只选中：单击不再直接粘贴收起面板（要粘贴用双击或 Enter）。
+        if (_singleClickPaste)
+        {
+            PasteRequested?.Invoke(viewModel.Source);
+        }
+    }
+
+    /// <summary>
+    /// 双击条目：始终按"粘贴这一条"处理。
+    /// 单击已开启粘贴时跳过，避免同一次双击触发两次粘贴。
+    /// </summary>
+    private void OnListMouseDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (_singleClickPaste || e.OriginalSource is not DependencyObject source)
+        {
+            return;
+        }
+
+        var container = ItemsControl.ContainerFromElement(ItemsList, source) as ListBoxItem;
+        if (container?.DataContext is not ClipItemViewModel viewModel)
+        {
+            return;
+        }
+
+        ItemsList.SelectedItem = viewModel;
         PasteRequested?.Invoke(viewModel.Source);
+    }
+
+    /// <summary>底部提示随单击行为切换 —— 文案必须和实际行为一致，否则用户会以为"点了没反应"。</summary>
+    private void UpdateClickHint()
+    {
+        if (HintText is null)
+        {
+            return;
+        }
+
+        HintText.Text = _singleClickPaste
+            ? "单击 / Enter 粘贴 · ↑↓ 选择 · Delete 删除 · 右键收藏 · Esc 关闭"
+            : "单击选中 · 双击 / Enter 粘贴 · ↑↓ 选择 · Delete 删除 · Esc 关闭";
     }
 }

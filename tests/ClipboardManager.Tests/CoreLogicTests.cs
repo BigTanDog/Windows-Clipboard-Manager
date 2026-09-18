@@ -125,7 +125,9 @@ public class RelativeTimeTests
     [Fact]
     public void 分钟与小时()
     {
-        var now = DateTimeOffset.Now;
+        // 用固定的当地中午：跨零点跑测试时 now.AddHours(-3) 会落到昨天，
+        // 文案变成「昨天 HH:mm」，导致断言随运行时刻随机失败（2026-09-19 实测踩到）。
+        var now = new DateTimeOffset(new DateTime(2026, 1, 15, 12, 0, 0, DateTimeKind.Local));
         Assert.Equal("5 分钟前", RelativeTime.Format(now.AddMinutes(-5), now));
         Assert.Equal("3 小时前", RelativeTime.Format(now.AddHours(-3), now));
     }
