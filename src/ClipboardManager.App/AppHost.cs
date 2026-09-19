@@ -41,6 +41,9 @@ internal sealed class AppHost : IDisposable
     private readonly SelfWriteFilter _selfWrite = new();
     private readonly SemaphoreSlim _backgroundGate = new(1, 1);
 
+    /// <summary>「当前剪贴板里到底是哪条记录」的记账本（面板徽标 + 删除即吊销的共同依据）。</summary>
+    private readonly ClipboardPresenceTracker _presence = new();
+
     private AppLog _log = new(null);
     private SettingsStore? _settingsStore;
     private AppSettings _settings = AppSettings.Default;
@@ -53,6 +56,7 @@ internal sealed class AppHost : IDisposable
     private HotkeyManager? _hotkeys;
     private PanelWindow? _panel;
     private PasteService? _paste;
+    private ClipboardRevoker? _revoker;
     private TrayIcon? _tray;
     private DispatcherTimer? _autoExitTimer;
     private DispatcherTimer? _panelWarmup;
@@ -135,7 +139,8 @@ internal sealed class AppHost : IDisposable
         _settings = _settingsStore.Load();
         _log.Diag(
             $"设置 | maxItems={_settings.MaxItems} diskQuotaMb={_settings.DiskQuotaMb} hotkey={_settings.Hotkey} "
-            + $"autoPaste={_settings.AutoPaste} maskSensitive={_settings.MaskSensitiveData} captureImages={_settings.CaptureImages}");
+            + $"autoPaste={_settings.AutoPaste} maskSensitive={_settings.MaskSensitiveData} captureImages={_settings.CaptureImages} "
+            + $"clearClipboardOnDelete={_settings.ClearClipboardOnDelete} hideOnClickOutside={_settings.HideOnClickOutside}");
 
         _repository = new SqliteHistoryRepository(AppPaths.DatabasePath);
         _repository.Initialize();
@@ -162,6 +167,11 @@ internal sealed class AppHost : IDisposable
 
         _clipboard = new ClipboardAccess(_messageWindow.Handle);
         _paste = new PasteService(_clipboard, _selfWrite, _blobs, _log);
+        _revoker = new ClipboardRevoker(
+            _clipboard,
+            _presence,
+            _log,
+            hash => _repository.FindByHash(hash) is not null);
 
         if (!_messageWindow.TryStartClipboardListening(out var listenError))
         {
@@ -213,6 +223,9 @@ internal sealed class AppHost : IDisposable
             {
                 EnsurePanel();
                 _log.Diag("面板窗口预热完成");
+
+                // 借预热这个空闲点补一次剪贴板身份同步（重启后徽标与吊销判定才不会失准）。
+                SyncClipboardPresence();
             }
             catch (Exception ex)
             {
@@ -273,6 +286,14 @@ internal sealed class AppHost : IDisposable
                 else
                 {
                     _log.Diag("剪贴板更新：没有受支持的格式，忽略");
+
+                    // 剪贴板换成了我们不跟踪的内容：吊销判定靠实时序列号（天然安全），
+                    // 但界面上那份列表还是旧的，面板正开着就顺手刷一下，
+                    // 免得「剪贴板中」徽标停在已经失效的条目上。
+                    if (_panel is { IsVisible: true })
+                    {
+                        RefreshListAsync();
+                    }
                 }
 
                 return;
@@ -327,6 +348,9 @@ internal sealed class AppHost : IDisposable
                     processed.Preview,
                     processed.BlobPath,
                     processed.SizeBytes);
+
+                // 登记「此刻剪贴板里装的就是这条记录」：面板徽标与删除时的吊销判定都靠它。
+                _presence.NoteCaptured(sequence, outcome.Id);
 
                 if (maxItems >= 0)
                 {
@@ -397,9 +421,19 @@ internal sealed class AppHost : IDisposable
         }
 
         var now = DateTimeOffset.Now;
+
+        // 徽标判定要点：必须带上「实时序列号」—— 剪贴板一旦被任何程序改写，旧记账立刻失效，
+        // 所以这里不能用缓存的序列号。
+        var liveSequence = ClipboardAccess.GetSequenceNumber();
         _panel.SetItems(
         [
-            .. items.Select(item => new ClipItemViewModel(item, _masker, now, _query, ThumbnailPath(item)))
+            .. items.Select(item => new ClipItemViewModel(
+                item,
+                _masker,
+                now,
+                _query,
+                ThumbnailPath(item),
+                _presence.IsCurrent(item.Id, liveSequence)))
         ]);
     }
 
@@ -569,12 +603,15 @@ internal sealed class AppHost : IDisposable
 
             _log.Diag($"粘贴请求 id={item.Id} 类型={item.Type}");
 
-            if (!paste.TryCopyToClipboard(item, out var error))
+            if (!paste.TryCopyToClipboard(item, out var writeSequence, out var error))
             {
                 _log.Error("粘贴失败：" + error);
                 return;
             }
 
+            // 剪贴板此刻装的就是这条记录 —— 必须同步身份：在面板里换一条，系统能粘贴的内容也跟着换，
+            // 「剪贴板中」徽标与后续的吊销判定都要跟着走（用户 2026-09-19 特别指出的细节）。
+            _presence.NoteCaptured(writeSequence, item.Id);
             _log.Diag("已写回剪贴板并登记自身写入序列号");
             HidePanel();
 
@@ -731,6 +768,16 @@ internal sealed class AppHost : IDisposable
                 }
 
                 _log.Diag($"删除记录 id={item.Id} 结果={removed}");
+
+                // 删除即吊销：真的删掉了才回 UI 线程处理剪贴板（剪贴板读写必须在 STA 线程）。
+                if (removed && record is not null && _settings.ClearClipboardOnDelete)
+                {
+                    var deleted = record;
+                    _ = _dispatcher.BeginInvoke(
+                        () => RevokeClipboardAfterDelete(deleted),
+                        DispatcherPriority.Background);
+                }
+
                 var items = QueryItems();
                 _ = _dispatcher.BeginInvoke(() => ApplyItems(items), DispatcherPriority.Background);
             }
@@ -911,8 +958,28 @@ internal sealed class AppHost : IDisposable
             return;
         }
 
+        // 删除前先判定：剪贴板里装的是不是我们历史里的某条记录 —— 记录一删就再也认不出身份了。
+        var revokeClipboard = false;
+        var clipboardSequence = 0L;
+        if (_settings.ClearClipboardOnDelete && _revoker is not null)
+        {
+            try
+            {
+                revokeClipboard = _revoker.HoldsTrackedRecord(out clipboardSequence);
+            }
+            catch (Exception ex)
+            {
+                _log.Error("判定剪贴板是否属于历史失败", ex);
+            }
+        }
+
+        // 破坏性操作先说清楚会波及什么：不能删完才让用户发现剪贴板被清了。
+        var clipboardNotice = _settings.ClearClipboardOnDelete
+            ? "\n若当前系统剪贴板里正是其中一条，剪贴板也会被一并清空。"
+            : string.Empty;
+
         var answer = MessageBox.Show(
-            $"确定要清空全部 {count} 条历史记录吗？\n收藏的记录也会被删除，且无法恢复。",
+            $"确定要清空全部 {count} 条历史记录吗？\n收藏的记录也会被删除，且无法恢复。{clipboardNotice}",
             "剪贴板管理器",
             MessageBoxButton.OKCancel,
             MessageBoxImage.Warning,
@@ -937,6 +1004,13 @@ internal sealed class AppHost : IDisposable
                 UpdateQuotaWarning(null);
                 var items = QueryItems();
                 _ = _dispatcher.BeginInvoke(() => ApplyItems(items), DispatcherPriority.Background);
+
+                if (revokeClipboard)
+                {
+                    _ = _dispatcher.BeginInvoke(
+                        () => RevokeClipboardAfterClearAll(clipboardSequence),
+                        DispatcherPriority.Background);
+                }
             }
             catch (Exception ex)
             {
@@ -1002,6 +1076,117 @@ internal sealed class AppHost : IDisposable
         return DiskUsage.Measure(count);
     }
 
+    /// <summary>删除记录后吊销剪贴板（UI 线程）；结果只在需要用户知情时给一行提示。</summary>
+    private void RevokeClipboardAfterDelete(ClipItem deleted)
+    {
+        try
+        {
+            var result = _revoker?.RevokeIfMatches(deleted);
+            if (result is null)
+            {
+                return;
+            }
+
+            switch (result.Status)
+            {
+                case RevokeStatus.Revoked:
+                    _panel?.SetActionHint("已删除记录，并清空了系统剪贴板");
+                    break;
+
+                case RevokeStatus.Failed:
+                    _panel?.SetActionHint("已删除记录；剪贴板被其它程序占用，未能一并清空");
+                    break;
+
+                default:
+                    // 剪贴板里本来就是别的内容：只删记录，静默即可（这也是最常见的正常路径）。
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.Error("删除后吊销剪贴板失败", ex);
+        }
+    }
+
+    /// <summary>「清空历史」完成后按条件清空剪贴板（UI 线程）。</summary>
+    private void RevokeClipboardAfterClearAll(long sequence)
+    {
+        try
+        {
+            _ = _revoker?.ClearIfUnchanged(sequence);
+        }
+        catch (Exception ex)
+        {
+            _log.Error("清空历史后吊销剪贴板失败", ex);
+        }
+    }
+
+    /// <summary>
+    /// 启动后补一次「当前剪贴板到底是哪条记录」的身份同步。
+    /// <para>
+    /// 为什么需要：重启后剪贴板里通常还留着上一条内容，而启动不会产生 <c>WM_CLIPBOARDUPDATE</c>，
+    /// 不补这一步的话「剪贴板中」徽标不会亮、删除时也走不到快速路径（虽有指纹兜底，但这里同步后
+    /// 更准、更快）。读剪贴板在 UI 线程（STA 要求），指纹计算是纯 CPU，丢到后台避免卡界面。
+    /// </para>
+    /// </summary>
+    private void SyncClipboardPresence()
+    {
+        try
+        {
+            var clipboard = _clipboard;
+            if (clipboard is null)
+            {
+                return;
+            }
+
+            if (!clipboard.TryReadPayloadWithSequence(out var payload, out var sequence, out var error))
+            {
+                if (!string.IsNullOrEmpty(error))
+                {
+                    _log.Diag("启动同步剪贴板身份失败：" + error);
+                }
+
+                return;
+            }
+
+            if (payload is null)
+            {
+                return;
+            }
+
+            _ = Task.Run(() =>
+            {
+                try
+                {
+                    var fingerprint = ClipboardFingerprint.Of(payload);
+                    if (fingerprint is null)
+                    {
+                        return;
+                    }
+
+                    var record = _repository?.FindByHash(fingerprint);
+                    if (record is null)
+                    {
+                        _log.Diag("启动同步：当前剪贴板内容不在历史里");
+                        return;
+                    }
+
+                    _presence.NoteCaptured(sequence, record.Id);
+                    _log.Diag($"启动同步：当前剪贴板 = 记录 id={record.Id}");
+                    _ = _dispatcher.BeginInvoke(RefreshListAsync, DispatcherPriority.Background);
+                }
+                catch (Exception ex)
+                {
+                    _log.Error("启动同步剪贴板身份失败", ex);
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            _log.Error("启动同步剪贴板身份失败", ex);
+        }
+    }
+
     /// <summary>
     /// 应用新设置：落盘 + 逐项生效（热键重注册、脱敏开关、图片记录、主题、开机自启、淘汰上限）。
     /// </summary>
@@ -1020,7 +1205,8 @@ internal sealed class AppHost : IDisposable
         _log.Info(
             $"设置已更新 | maxItems={_settings.MaxItems} diskQuotaMb={_settings.DiskQuotaMb} hotkey={_settings.Hotkey} "
             + $"autoStart={_settings.AutoStart}({_settings.AutoStartDelaySeconds}s) captureImages={_settings.CaptureImages} "
-            + $"maskSensitive={_settings.MaskSensitiveData} theme={_settings.Theme}");
+            + $"maskSensitive={_settings.MaskSensitiveData} clearClipboardOnDelete={_settings.ClearClipboardOnDelete} "
+            + $"theme={_settings.Theme}");
 
         // 1) 脱敏开关（D-13）
         _masker = _settings.MaskSensitiveData ? new SensitiveMasker(true) : SensitiveMasker.Disabled;

@@ -76,6 +76,7 @@ public partial class SettingsWindow : Window
         CaptureImagesBox.IsChecked = current.CaptureImages;
         AutoPasteBox.IsChecked = current.AutoPaste;
         MaskBox.IsChecked = current.MaskSensitiveData;
+        ClearClipboardOnDeleteBox.IsChecked = current.ClearClipboardOnDelete;
         ExcludeByProcessBox.IsChecked = current.ExcludeByProcessName;
         HideOnClickOutsideBox.IsChecked = current.HideOnClickOutside;
         SingleClickPasteBox.IsChecked = current.SingleClickPaste;
@@ -439,6 +440,7 @@ public partial class SettingsWindow : Window
             MaskSensitiveData = MaskBox.IsChecked == true,
             HideOnClickOutside = HideOnClickOutsideBox.IsChecked == true,
             SingleClickPaste = SingleClickPasteBox.IsChecked == true,
+            ClearClipboardOnDelete = ClearClipboardOnDeleteBox.IsChecked == true,
             AcrylicStrength = (int)Math.Round(AcrylicSlider.Value),
         }.Normalize();
 

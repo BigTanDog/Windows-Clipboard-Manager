@@ -79,19 +79,33 @@
                            Text="搜索文字内容或文件名" />
             </Grid>
 
-            <!-- 磁盘上限提示（D-09：只剩收藏仍超限时提示用户，不自动删除） -->
-            <Border x:Name="QuotaHint"
-                    Grid.Row="2"
-                    Margin="12,4,12,0"
-                    Padding="8,5"
-                    CornerRadius="4"
-                    Visibility="Collapsed"
-                    Background="{DynamicResource WarningBackgroundBrush}">
-                <TextBlock x:Name="QuotaHintText"
-                           TextWrapping="Wrap"
-                           FontSize="12"
-                           Foreground="{DynamicResource WarningTextBrush}" />
-            </Border>
+            <StackPanel Grid.Row="2">
+                <!-- 操作反馈（例如「已删除记录，并清空了系统剪贴板」），几秒后自动消失 -->
+                <Border x:Name="ActionHint"
+                        Margin="12,4,12,0"
+                        Padding="8,5"
+                        CornerRadius="4"
+                        Visibility="Collapsed"
+                        Background="{DynamicResource InfoBackgroundBrush}">
+                    <TextBlock x:Name="ActionHintText"
+                               TextWrapping="Wrap"
+                               FontSize="12"
+                               Foreground="{DynamicResource InfoTextBrush}" />
+                </Border>
+
+                <!-- 磁盘上限提示（D-09：只剩收藏仍超限时提示用户，不自动删除） -->
+                <Border x:Name="QuotaHint"
+                        Margin="12,4,12,0"
+                        Padding="8,5"
+                        CornerRadius="4"
+                        Visibility="Collapsed"
+                        Background="{DynamicResource WarningBackgroundBrush}">
+                    <TextBlock x:Name="QuotaHintText"
+                               TextWrapping="Wrap"
+                               FontSize="12"
+                               Foreground="{DynamicResource WarningTextBrush}" />
+                </Border>
+            </StackPanel>
 
             <!-- 记录列表：虚拟化 + 回收，保证数百条仍然流畅 -->
             <ListBox x:Name="ItemsList"
@@ -132,12 +146,18 @@
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
 
-                            <!-- 收藏标记 -->
-                            <TextBlock Grid.Column="0"
-                                       Margin="0,0,4,0"
-                                       VerticalAlignment="Top"
-                                       Foreground="{DynamicResource PinnedBrush}"
-                                       Text="{Binding PinGlyph}" />
+                            <!-- 「剪贴板中」徽标 + 收藏标记：徽标表示这条正是系统当前能粘贴的内容
+                                 （删掉它时系统剪贴板会被一并清空） -->
+                            <StackPanel Grid.Column="0" Orientation="Horizontal">
+                                <Border Style="{StaticResource CurrentChipStyle}"
+                                        Visibility="{Binding IsCurrentInClipboard, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                    <TextBlock Style="{StaticResource CurrentChipTextStyle}" Text="剪贴板中" />
+                                </Border>
+                                <TextBlock Margin="0,0,4,0"
+                                           VerticalAlignment="Top"
+                                           Foreground="{DynamicResource PinnedBrush}"
+                                           Text="{Binding PinGlyph}" />
+                            </StackPanel>
 
                             <!-- 类型徽标：每种内容一套柔和配色 + 矢量小图标（文本/图片/文件/网站/HTML） -->
                             <Border Grid.Column="1" Style="{StaticResource KindChipStyle}">

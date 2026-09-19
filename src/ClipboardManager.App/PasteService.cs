@@ -35,10 +35,12 @@ internal sealed class PasteService
     /// 把记录内容写回剪贴板（按类型选择格式；HTML 记录额外附纯文本降级，D-08）。
     /// </summary>
     /// <param name="item">目标记录（使用原文，绝不使用脱敏后的展示文本）。</param>
+    /// <param name="sequenceAfterWrite">写入后的剪贴板序列号（供调用方登记「剪贴板里就是这条」）。</param>
     /// <param name="error">失败原因。</param>
-    public bool TryCopyToClipboard(ClipItem item, out string? error)
+    public bool TryCopyToClipboard(ClipItem item, out long sequenceAfterWrite, out string? error)
     {
         ArgumentNullException.ThrowIfNull(item);
+        sequenceAfterWrite = 0;
         error = null;
 
         var request = BuildRequest(item);
@@ -55,6 +57,7 @@ internal sealed class PasteService
             return false;
         }
 
+        sequenceAfterWrite = sequence;
         _selfWrite.NoteOwnWrite(sequence, request.ContentHash, DateTimeOffset.Now);
         return true;
     }

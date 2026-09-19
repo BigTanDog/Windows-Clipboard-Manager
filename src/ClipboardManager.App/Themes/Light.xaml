@@ -16,6 +16,11 @@
     <SolidColorBrush x:Key="PinnedBrush" Color="#B57A16" />
     <SolidColorBrush x:Key="WarningBackgroundBrush" Color="#FDF3D8" />
     <SolidColorBrush x:Key="WarningTextBrush" Color="#7A5A12" />
+    <!-- 中性信息条（操作反馈）与「剪贴板中」徽标 -->
+    <SolidColorBrush x:Key="InfoBackgroundBrush" Color="#E7EEFB" />
+    <SolidColorBrush x:Key="InfoTextBrush" Color="#2C4C86" />
+    <SolidColorBrush x:Key="CurrentChipBackgroundBrush" Color="#D7E3FB" />
+    <SolidColorBrush x:Key="CurrentChipForegroundBrush" Color="#2C5AA8" />
     <SolidColorBrush x:Key="MenuBackgroundBrush" Color="#FDFBF7" />
     <SolidColorBrush x:Key="ControlBackgroundBrush" Color="#FFFFFF" />
     <SolidColorBrush x:Key="ControlHoverBrush" Color="#F1ECE2" />

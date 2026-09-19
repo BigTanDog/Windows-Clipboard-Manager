@@ -51,9 +51,21 @@ public sealed class ClipboardAccess
     /// 一次开锁内完成探测与拷贝。返回 false 且 <paramref name="error"/> 为 null 表示
     /// 「当前没有受支持的内容」，属正常情况。
     /// </summary>
-    public bool TryReadPayload(out ClipCandidate? payload, out string? error)
+    public bool TryReadPayload(out ClipCandidate? payload, out string? error) =>
+        TryReadPayloadWithSequence(out payload, out _, out error);
+
+    /// <summary>
+    /// 与 <see cref="TryReadPayload(out ClipCandidate?, out string?)"/> 相同，但额外返回
+    /// <b>锁内</b>读到的剪贴板序列号 —— 它标记的正是这份内容，是「删除即吊销」判定的基础
+    /// （配合 <see cref="TryClearIfSequence"/> 才能保证判定与清空之间不被插队）。
+    /// </summary>
+    /// <param name="payload">读到的候选；false 且 error 为 null 时表示没有受支持的格式。</param>
+    /// <param name="sequence">锁内序列号（仅成功时有意义）。</param>
+    /// <param name="error">失败原因。</param>
+    public bool TryReadPayloadWithSequence(out ClipCandidate? payload, out long sequence, out string? error)
     {
         payload = null;
+        sequence = 0;
         error = null;
 
         for (var attempt = 1; attempt <= MaxAttempts; attempt++)
@@ -77,73 +89,80 @@ public sealed class ClipboardAccess
             try
             {
                 var capturedAt = DateTimeOffset.Now;
+                ClipCandidate? candidate = null;
 
                 if (NativeMethods.IsClipboardFormatAvailable(NativeMethods.CF_HDROP))
                 {
                     var paths = ReadFilePathsInLock();
                     if (paths.Count > 0)
                     {
-                        payload = new ClipCandidate
+                        candidate = new ClipCandidate
                         {
                             Type = ClipContentType.FileList,
                             FilePaths = paths,
                             CapturedAt = capturedAt,
                         };
-                        return true;
                     }
                 }
 
-                var dibFormat = NativeMethods.IsClipboardFormatAvailable(NativeMethods.CF_DIBV5)
-                    ? NativeMethods.CF_DIBV5
-                    : NativeMethods.CF_DIB;
-                if (NativeMethods.IsClipboardFormatAvailable(dibFormat))
+                if (candidate is null)
                 {
-                    var dib = ReadBinaryInLock(dibFormat);
-                    if (dib is not null)
+                    var dibFormat = NativeMethods.IsClipboardFormatAvailable(NativeMethods.CF_DIBV5)
+                        ? NativeMethods.CF_DIBV5
+                        : NativeMethods.CF_DIB;
+                    if (NativeMethods.IsClipboardFormatAvailable(dibFormat))
                     {
-                        payload = new ClipCandidate
+                        var dib = ReadBinaryInLock(dibFormat);
+                        if (dib is not null)
                         {
-                            Type = ClipContentType.Image,
-                            Binary = dib,
-                            BlobExtension = "png",
-                            CapturedAt = capturedAt,
-                        };
-                        return true;
+                            candidate = new ClipCandidate
+                            {
+                                Type = ClipContentType.Image,
+                                Binary = dib,
+                                BlobExtension = "png",
+                                CapturedAt = capturedAt,
+                            };
+                        }
                     }
                 }
 
-                if (NativeMethods.IsClipboardFormatAvailable(HtmlFormat))
+                if (candidate is null && NativeMethods.IsClipboardFormatAvailable(HtmlFormat))
                 {
                     var html = ReadBinaryInLock(HtmlFormat);
                     if (html is not null)
                     {
-                        payload = new ClipCandidate
+                        candidate = new ClipCandidate
                         {
                             Type = ClipContentType.Html,
                             Binary = html,
                             BlobExtension = "html",
                             CapturedAt = capturedAt,
                         };
-                        return true;
                     }
                 }
 
-                if (NativeMethods.IsClipboardFormatAvailable(NativeMethods.CF_UNICODETEXT))
+                if (candidate is null && NativeMethods.IsClipboardFormatAvailable(NativeMethods.CF_UNICODETEXT))
                 {
                     var text = ReadUnicodeTextInLock();
                     if (text is not null)
                     {
-                        payload = new ClipCandidate
+                        candidate = new ClipCandidate
                         {
                             Type = ClipContentType.Text,
                             Text = text,
                             CapturedAt = capturedAt,
                         };
-                        return true;
                     }
                 }
 
-                return false; // 没有受支持的格式
+                if (candidate is null)
+                {
+                    return false; // 没有受支持的格式
+                }
+
+                sequence = NativeMethods.GetClipboardSequenceNumber();
+                payload = candidate;
+                return true;
             }
             finally
             {
@@ -153,6 +172,67 @@ public sealed class ClipboardAccess
 
         error = "读取剪贴板失败";
         return false;
+    }
+
+    /// <summary>
+    /// 条件清空剪贴板：<b>仅当序列号仍是 <paramref name="expectedSequence"/> 时</b>才清空。
+    /// <para>
+    /// 为什么必须带条件：调用方在此之前判定过「剪贴板里就是我们要吊销的那条记录」，
+    /// 但判定与实际清空之间存在时间差，期间可能有别的程序写下新内容；
+    /// 无条件清空就会毁掉用户刚复制的东西。复核发生在<b>持有剪贴板锁期间</b>，
+    /// 因此「复核 + 清空」是原子的 —— 拿到锁以后没有任何程序能再改动剪贴板。
+    /// </para>
+    /// </summary>
+    /// <param name="expectedSequence">判定时（或锁内读取时）取得的序列号。</param>
+    public ClipboardClearResult TryClearIfSequence(long expectedSequence)
+    {
+        for (var attempt = 1; attempt <= MaxAttempts; attempt++)
+        {
+            if (!NativeMethods.OpenClipboard(_ownerWindow))
+            {
+                var code = Marshal.GetLastWin32Error();
+                if (code == NativeMethods.ERROR_ACCESS_DENIED && attempt < MaxAttempts)
+                {
+                    Thread.Sleep(RetryDelayMs);
+                    continue;
+                }
+
+                return new ClipboardClearResult(
+                    ClipboardClearStatus.Failed,
+                    0,
+                    code == NativeMethods.ERROR_ACCESS_DENIED
+                        ? $"剪贴板被其它程序占用（已重试 {MaxAttempts} 次），未清空"
+                        : $"打开剪贴板失败，Win32 错误码 {code}");
+            }
+
+            try
+            {
+                if (NativeMethods.GetClipboardSequenceNumber() != expectedSequence)
+                {
+                    // 内容已被换掉：这次吊销作废，但也不该清 —— 保留用户的新内容。
+                    return new ClipboardClearResult(ClipboardClearStatus.SequenceChanged, 0, null);
+                }
+
+                if (!NativeMethods.EmptyClipboard())
+                {
+                    return new ClipboardClearResult(
+                        ClipboardClearStatus.Failed,
+                        0,
+                        $"清空剪贴板失败，Win32 错误码 {Marshal.GetLastWin32Error()}");
+                }
+
+                return new ClipboardClearResult(
+                    ClipboardClearStatus.Cleared,
+                    NativeMethods.GetClipboardSequenceNumber(),
+                    null);
+            }
+            finally
+            {
+                NativeMethods.CloseClipboard();
+            }
+        }
+
+        return new ClipboardClearResult(ClipboardClearStatus.Failed, 0, "清空剪贴板失败（已重试）");
     }
 
     /// <summary>

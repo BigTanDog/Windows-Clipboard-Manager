@@ -118,6 +118,14 @@
                            FontSize="12"
                            Foreground="{DynamicResource MutedTextBrush}"
                            Text="仅影响列表显示：粘贴出去的仍是原文。" />
+                <CheckBox x:Name="ClearClipboardOnDeleteBox"
+                          Margin="0,0,0,4"
+                          Content="删除记录时，如果它正是当前剪贴板内容，同时清空剪贴板" />
+                <TextBlock Margin="24,0,0,10"
+                           TextWrapping="Wrap"
+                           FontSize="12"
+                           Foreground="{DynamicResource MutedTextBrush}"
+                           Text="默认开启：删掉之后桌面右键的「粘贴」会立刻变灰，不会再粘出已删除的内容（面板上带「剪贴板中」徽标的就是这一条）。只清系统当前剪贴板；Win+V 历史里的副本和已经粘贴出去的内容不受影响。" />
                 <Grid Margin="0,0,0,8">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="150" />

@@ -437,6 +437,32 @@ public sealed class SqliteHistoryRepository : IDisposable
         }
     }
 
+    /// <summary>
+    /// 按内容哈希取记录（「删除即吊销」用：判断当前剪贴板里的内容是不是我们历史里的某条）。
+    /// </summary>
+    /// <param name="contentHash">内容哈希（与入库去重键同一口径）。</param>
+    public ClipItem? FindByHash(string contentHash)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(contentHash);
+
+        lock (_gate)
+        {
+            var connection = EnsureConnection();
+            using var command = connection.CreateCommand();
+            command.CommandText = """
+                SELECT id, type, text_content, blob_path, file_paths, preview, content_hash,
+                       size_bytes, is_pinned, source_app, created_at, updated_at
+                FROM clip_items
+                WHERE content_hash = $hash
+                LIMIT 1;
+                """;
+            command.Parameters.AddWithValue("$hash", contentHash);
+
+            using var reader = command.ExecuteReader();
+            return reader.Read() ? Map(reader) : null;
+        }
+    }
+
     /// <summary>取所有仍被引用的本体路径（供启动时清理孤儿文件）。</summary>
     public IReadOnlyList<string> GetReferencedBlobPaths()
     {

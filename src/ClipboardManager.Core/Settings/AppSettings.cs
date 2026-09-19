@@ -9,8 +9,24 @@ namespace ClipboardManager.Core.Settings;
 /// </summary>
 public sealed record AppSettings
 {
-    /// <summary>设置文件结构版本（用于将来迁移）。</summary>
-    public const int CurrentSchemaVersion = 1;
+    /// <summary>
+    /// 设置文件结构版本（迁移用）。
+    /// <para>
+    /// 版本 2（2026-09-19）：新增 <see cref="ClearClipboardOnDelete"/>。
+    /// </para>
+    /// <para>
+    /// <b>为什么新增"默认开启"的开关必须升版本号</b>：本项目的设置用源生成 JSON 反序列化，
+    /// 文件里<b>缺字段</b>时得到的是该类型的零值（<c>bool</c> → <c>false</c>），
+    /// <b>不是</b>属性声明上的初始值。实测（<c>ClipboardRevokeTests.旧设置文件缺少新字段时取默认值</c>）确认：
+    /// 若不做迁移，老用户升级后新功能会静默变成"关闭"，而且界面上看不出来。
+    /// 所以：新增默认开启的开关 = 升 <see cref="CurrentSchemaVersion"/> + 在
+    /// <see cref="Normalize"/> 里按旧版本号补上默认值。
+    /// </para>
+    /// </summary>
+    public const int CurrentSchemaVersion = 2;
+
+    /// <summary>引入 <see cref="ClearClipboardOnDelete"/> 之前的设置文件版本（低于此版本视为"没这个字段"）。</summary>
+    private const int SchemaVersionBeforeClearClipboardOnDelete = 2;
 
     /// <summary>记录条数上限的可选档位（-1 表示不限制）。</summary>
     public static readonly int[] MaxItemsOptions = [50, 100, 200, 500, -1];
@@ -74,6 +90,20 @@ public sealed record AppSettings
     public int AcrylicStrength { get; init; }
 
     /// <summary>
+    /// 删除历史记录时，如果它正是当前系统剪贴板里的内容，就一并清空剪贴板（默认开启）。
+    /// <para>
+    /// 效果：删除后桌面右键的「粘贴」立刻变灰，不会再误粘贴出已删掉的内容。
+    /// 只有「内容确实是我们这一条」时才清（判定与清空在剪贴板锁内原子完成）；
+    /// 剪贴板已换成别的内容时<strong>绝不动它</strong>。
+    /// </para>
+    /// <para>
+    /// 边界：只影响系统当前剪贴板 —— Windows 剪贴板历史（Win+V）里的副本、
+    /// 已经粘贴到别处的内容、其它剪贴板管理器的数据库都管不到（系统没有按条目删除的接口）。
+    /// </para>
+    /// </summary>
+    public bool ClearClipboardOnDelete { get; init; } = true;
+
+    /// <summary>
     /// 单击条目是否直接粘贴并收起面板。
     /// <para>
     /// 默认 <c>false</c>：<b>单击只选中</b>，粘贴交给双击或 <c>Enter</c> —— 避免"只想选中看看"时
@@ -118,6 +148,7 @@ public sealed record AppSettings
             && HideOnClickOutside == other.HideOnClickOutside
             && AcrylicStrength == other.AcrylicStrength
             && SingleClickPaste == other.SingleClickPaste
+            && ClearClipboardOnDelete == other.ClearClipboardOnDelete
             && ExcludedApps.SequenceEqual(other.ExcludedApps, StringComparer.OrdinalIgnoreCase);
     }
 
@@ -139,6 +170,7 @@ public sealed record AppSettings
         hash.Add(HideOnClickOutside);
         hash.Add(AcrylicStrength);
         hash.Add(SingleClickPaste);
+        hash.Add(ClearClipboardOnDelete);
         foreach (var app in ExcludedApps)
         {
             hash.Add(app, StringComparer.OrdinalIgnoreCase);
@@ -149,7 +181,8 @@ public sealed record AppSettings
 
     /// <summary>
     /// 把非法值收敛到合法范围：档位不在候选表内取最接近的合法档位，
-    /// 主题/热键格式非法则回退默认值。保证 <see cref="Normalize"/> 幂等。
+    /// 主题/热键格式非法则回退默认值；并按 <see cref="SchemaVersion"/> 补齐新增开关的默认值。
+    /// 保证 <see cref="Normalize"/> 幂等。
     /// </summary>
     public AppSettings Normalize()
     {
@@ -166,6 +199,12 @@ public sealed record AppSettings
             DiskQuotaMb = NormalizeOption(DiskQuotaMb, DiskQuotaMbOptions, DefaultDiskQuotaMb),
             Hotkey = string.IsNullOrWhiteSpace(Hotkey) ? DefaultHotkey : Hotkey.Trim(),
             Theme = theme,
+
+            // 迁移：v2 之前的设置文件里没有 clearClipboardOnDelete 字段，
+            // 反序列化只会给出默认值 false —— 这里按「当时的设计默认值（开启）」补上。
+            ClearClipboardOnDelete = SchemaVersion < SchemaVersionBeforeClearClipboardOnDelete
+                ? true
+                : ClearClipboardOnDelete,
             AutoStartDelaySeconds = Math.Clamp(AutoStartDelaySeconds, 0, AutoStartCommand.MaxDelaySeconds),
             AcrylicStrength = AcrylicTint.Normalize(AcrylicStrength),
             ExcludedApps = ExcludedApps?

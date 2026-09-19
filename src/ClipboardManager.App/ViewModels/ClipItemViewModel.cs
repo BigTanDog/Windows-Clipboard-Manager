@@ -20,12 +20,17 @@ public sealed class ClipItemViewModel
     /// <param name="now">当前时间（用于相对时间文案）。</param>
     /// <param name="searchQuery">当前搜索词（非空时展示命中片段）。</param>
     /// <param name="thumbnailPath">缩略图绝对路径（图片记录才有）。</param>
+    /// <param name="isCurrentClipboardItem">
+    /// 这条是否<strong>正装在系统剪贴板里</strong>（由宿主持 <c>ClipboardPresenceTracker</c> 判定后传入；
+    /// 判定必须带实时序列号，否则剪贴板被改写后徽标会失准）。
+    /// </param>
     public ClipItemViewModel(
         ClipItem source,
         SensitiveMasker masker,
         DateTimeOffset now,
         string? searchQuery = null,
-        string? thumbnailPath = null)
+        string? thumbnailPath = null,
+        bool isCurrentClipboardItem = false)
     {
         ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(masker);
@@ -38,6 +43,7 @@ public sealed class ClipItemViewModel
         ThumbnailPath = thumbnailPath;
         HasThumbnail = !string.IsNullOrEmpty(thumbnailPath);
         IsPinned = source.IsPinned;
+        IsCurrentInClipboard = isCurrentClipboardItem;
 
         // 搜索命中时展示命中附近的片段（仍要脱敏），否则展示摘要。
         var display = string.IsNullOrWhiteSpace(searchQuery)
@@ -113,4 +119,10 @@ public sealed class ClipItemViewModel
 
     /// <summary>收藏标记文字（收藏时显示 ★，否则为空以保持紧凑）。</summary>
     public string PinGlyph => IsPinned ? "★" : string.Empty;
+
+    /// <summary>
+    /// 是否正是当前系统剪贴板里的那条（列表显示「剪贴板中」徽标）。
+    /// <para>它同时是「删除即吊销」的预兆：删掉这一条，剪贴板里的内容也会被一并清空。</para>
+    /// </summary>
+    public bool IsCurrentInClipboard { get; }
 }

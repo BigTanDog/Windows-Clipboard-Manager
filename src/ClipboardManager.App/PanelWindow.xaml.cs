@@ -27,6 +27,7 @@ public partial class PanelWindow : Window
 
     private readonly ObservableCollection<ClipItemViewModel> _items = [];
     private readonly DispatcherTimer _searchDebounce;
+    private readonly DispatcherTimer _actionHintTimer;
     private bool _contextMenuOpen;
     private bool _singleClickPaste;
 
@@ -45,6 +46,17 @@ public partial class PanelWindow : Window
         {
             _searchDebounce.Stop();
             SearchRequested?.Invoke(CurrentQuery);
+        };
+
+        // 操作反馈条：显示若干秒后自动收起（纯可见性切换，不引入动画 —— 透明窗口上做动画容易与合成打架）。
+        _actionHintTimer = new DispatcherTimer(DispatcherPriority.Background)
+        {
+            Interval = TimeSpan.FromSeconds(4),
+        };
+        _actionHintTimer.Tick += (_, _) =>
+        {
+            _actionHintTimer.Stop();
+            ActionHint.Visibility = Visibility.Collapsed;
         };
 
         Deactivated += OnPanelDeactivated;
@@ -164,6 +176,29 @@ public partial class PanelWindow : Window
         QuotaHint.Visibility = string.IsNullOrEmpty(message) ? Visibility.Collapsed : Visibility.Visible;
     }
 
+    /// <summary>
+    /// 显示一条操作反馈（例如「已删除记录，并清空了系统剪贴板」）。传 null 即收起。
+    /// <para>
+    /// 存在的理由：清空剪贴板是「动了用户东西」的操作，必须给回执 —— 否则用户会觉得剪贴板莫名其妙空了。
+    /// </para>
+    /// </summary>
+    /// <param name="message">提示文案；null 或空串表示收起。</param>
+    public void SetActionHint(string? message)
+    {
+        _actionHintTimer.Stop();
+
+        if (string.IsNullOrEmpty(message))
+        {
+            ActionHintText.Text = string.Empty;
+            ActionHint.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        ActionHintText.Text = message;
+        ActionHint.Visibility = Visibility.Visible;
+        _actionHintTimer.Start();
+    }
+
     /// <summary>把键盘焦点交给列表（面板弹出后调用）。</summary>
     public void FocusList() => ItemsList.Focus();
 
@@ -173,6 +208,9 @@ public partial class PanelWindow : Window
         SearchBox.Text = string.Empty;
         SearchHint.Visibility = Visibility.Visible;
         _searchDebounce.Stop();
+
+        // 顺带清掉上一次的临时反馈：每次弹出都应从干净状态开始。
+        SetActionHint(null);
     }
 
     /// <inheritdoc />
