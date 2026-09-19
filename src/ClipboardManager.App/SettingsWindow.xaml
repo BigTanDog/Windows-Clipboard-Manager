@@ -118,6 +118,19 @@
                            FontSize="12"
                            Foreground="{DynamicResource MutedTextBrush}"
                            Text="仅影响列表显示：粘贴出去的仍是原文。" />
+                <Grid Margin="0,0,0,4">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="150" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" VerticalAlignment="Center" Text="敏感信息自动清空剪贴板" />
+                    <ComboBox x:Name="SensitiveClearBox" Grid.Column="1" Height="28" />
+                </Grid>
+                <TextBlock Margin="24,0,0,10"
+                           TextWrapping="Wrap"
+                           FontSize="12"
+                           Foreground="{DynamicResource MutedTextBrush}"
+                           Text="默认关闭。开启后：复制到含手机号 / 身份证 / 银行卡 / 邮箱 / 密钥等的内容时，过 N 分钟自动清空系统剪贴板（识别规则与上面的脱敏显示一致，但两个开关互不影响）。只清当前剪贴板；期间你又复制了别的内容则不会误清。" />
                 <CheckBox x:Name="ClearClipboardOnDeleteBox"
                           Margin="0,0,0,4"
                           Content="删除记录时，如果它正是当前剪贴板内容，同时清空剪贴板" />

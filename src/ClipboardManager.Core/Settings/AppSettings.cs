@@ -34,11 +34,23 @@ public sealed record AppSettings
     /// <summary>磁盘占用上限（MB）的可选档位（-1 表示不限制）。</summary>
     public static readonly int[] DiskQuotaMbOptions = [200, 500, 1024, 2048, -1];
 
+    /// <summary>敏感内容自动清空剪贴板的档位（分钟；0 = 关闭，附加项 B-09）。</summary>
+    public static readonly int[] SensitiveClearMinutesOptions = [0, 1, 2, 5, 10, 30];
+
+    /// <summary>
+    /// 档位的中文文案（设置窗口的下拉项由此生成，保证「文案 ↔ 取值」永远一一对应，不会因两边各写一份而错位）。
+    /// </summary>
+    /// <param name="minutes">档位分钟数（&lt;= 0 表示关闭）。</param>
+    public static string SensitiveClearLabel(int minutes) => minutes <= 0 ? "关闭" : $"{minutes} 分钟";
+
     /// <summary>默认条数上限（需求 §3.3）。</summary>
     public const int DefaultMaxItems = 100;
 
     /// <summary>默认磁盘上限 MB（产品计划 D-09）。</summary>
     public const int DefaultDiskQuotaMb = 500;
+
+    /// <summary>敏感内容自动清空的默认档位（0 = 关闭；附加项 B-09 用户要求默认关闭）。</summary>
+    public const int DefaultSensitiveClearMinutes = 0;
 
     /// <summary>默认热键（需求 §3.4）。</summary>
     public const string DefaultHotkey = "Ctrl+Shift+V";
@@ -77,6 +89,21 @@ public sealed record AppSettings
 
     /// <summary>是否对敏感信息做脱敏显示（产品计划 D-13，默认开启）。</summary>
     public bool MaskSensitiveData { get; init; } = true;
+
+    /// <summary>
+    /// 敏感内容复制后自动清空剪贴板的分钟数（**0 = 关闭，默认关闭**；附加项 B-09）。
+    /// <para>
+    /// 开启后：复制到含敏感信息（手机号 / 身份证 / 银行卡 / 邮箱 / 密钥 / 密码键值）的文本时，
+    /// 过 N 分钟把<b>系统剪贴板</b>清掉。清空前用序列号复核，期间你又复制了别的内容则什么都不会发生。
+    /// 判定口径与「脱敏显示」共用同一套规则，但两个开关彼此独立。
+    /// </para>
+    /// <para>档位见 <see cref="SensitiveClearMinutesOptions"/>；识别不到敏感信息的类型（图片 / 文件）不生效。</para>
+    /// <para>
+    /// 注意：本字段默认值是 0（关闭），与类型零值一致 —— 因此<b>不需要</b>像
+    /// <see cref="ClearClipboardOnDelete"/> 那样做 schema 迁移（老设置文件里缺这个字段时读到的 0 正是期望值）。
+    /// </para>
+    /// </summary>
+    public int ClearSensitiveAfterMinutes { get; init; }
 
     /// <summary>
     /// 点击面板外部（面板失去激活）时自动隐藏（附加项 B-01，默认开启）。
@@ -149,6 +176,7 @@ public sealed record AppSettings
             && AcrylicStrength == other.AcrylicStrength
             && SingleClickPaste == other.SingleClickPaste
             && ClearClipboardOnDelete == other.ClearClipboardOnDelete
+            && ClearSensitiveAfterMinutes == other.ClearSensitiveAfterMinutes
             && ExcludedApps.SequenceEqual(other.ExcludedApps, StringComparer.OrdinalIgnoreCase);
     }
 
@@ -171,6 +199,7 @@ public sealed record AppSettings
         hash.Add(AcrylicStrength);
         hash.Add(SingleClickPaste);
         hash.Add(ClearClipboardOnDelete);
+        hash.Add(ClearSensitiveAfterMinutes);
         foreach (var app in ExcludedApps)
         {
             hash.Add(app, StringComparer.OrdinalIgnoreCase);
@@ -205,6 +234,13 @@ public sealed record AppSettings
             ClearClipboardOnDelete = SchemaVersion < SchemaVersionBeforeClearClipboardOnDelete
                 ? true
                 : ClearClipboardOnDelete,
+
+            // B-09 的档位默认 0（关闭），与类型零值一致 → 老文件缺字段时读到的 0 就是期望值，
+            // 不需要迁移（这条注释是刻意留的：下次新增「默认关闭」的字段可以照此判断）。
+            ClearSensitiveAfterMinutes = NormalizeOption(
+                ClearSensitiveAfterMinutes,
+                SensitiveClearMinutesOptions,
+                DefaultSensitiveClearMinutes),
             AutoStartDelaySeconds = Math.Clamp(AutoStartDelaySeconds, 0, AutoStartCommand.MaxDelaySeconds),
             AcrylicStrength = AcrylicTint.Normalize(AcrylicStrength),
             ExcludedApps = ExcludedApps?

@@ -44,6 +44,15 @@ internal sealed class AppHost : IDisposable
     /// <summary>「当前剪贴板里到底是哪条记录」的记账本（面板徽标 + 删除即吊销的共同依据）。</summary>
     private readonly ClipboardPresenceTracker _presence = new();
 
+    /// <summary>
+    /// 敏感内容自动清空的计时器（附加项 B-09）：到点清空系统剪贴板。
+    /// 只在 UI 线程上读写（剪贴板读写有 STA 亲和性），由 <see cref="ArmSensitiveClear"/> 设置间隔。
+    /// </summary>
+    private readonly DispatcherTimer _sensitiveClearTimer = new(DispatcherPriority.Background);
+
+    /// <summary>待清空的剪贴板序列号（-1 表示没有排定）。到点按它复核，内容变了就放弃。</summary>
+    private long _sensitiveClearSequence = -1;
+
     private AppLog _log = new(null);
     private SettingsStore? _settingsStore;
     private AppSettings _settings = AppSettings.Default;
@@ -77,6 +86,8 @@ internal sealed class AppHost : IDisposable
         _diag = diag;
         _durationSeconds = durationSeconds;
         _interactive = !diag;
+
+        _sensitiveClearTimer.Tick += (_, _) => OnSensitiveClearDue();
     }
 
     /// <summary>启动：数据目录自检 → 设置 → 数据库与本体目录 → 消息窗口与监听 → 热键 → READY → 预热。</summary>
@@ -114,6 +125,7 @@ internal sealed class AppHost : IDisposable
             _repository?.Dispose();
             _autoExitTimer?.Stop();
             _panelWarmup?.Stop();
+            _sensitiveClearTimer.Stop();
             _backgroundGate.Dispose();
             _log.Info($"退出 | 运行 {(int)_uptime.Elapsed.TotalSeconds} 秒");
         }
@@ -323,6 +335,7 @@ internal sealed class AppHost : IDisposable
     private void EnqueueCapture(ClipCandidate candidate, long sequence)
     {
         var maxItems = _settings.MaxItems;
+        var sensitiveMinutes = _settings.ClearSensitiveAfterMinutes;
 
         _ = Task.Run(async () =>
         {
@@ -351,6 +364,17 @@ internal sealed class AppHost : IDisposable
 
                 // 登记「此刻剪贴板里装的就是这条记录」：面板徽标与删除时的吊销判定都靠它。
                 _presence.NoteCaptured(sequence, outcome.Id);
+
+                // B-09：含敏感信息的内容排定「到点自动清空剪贴板」。排定要动 DispatcherTimer，回 UI 线程做。
+                var plan = SensitiveClearPlanner.Plan(
+                    processed.Candidate,
+                    sensitiveMinutes,
+                    sequence,
+                    DateTimeOffset.Now);
+                if (plan is not null)
+                {
+                    _ = _dispatcher.BeginInvoke(() => ArmSensitiveClear(plan), DispatcherPriority.Background);
+                }
 
                 if (maxItems >= 0)
                 {
@@ -1113,12 +1137,134 @@ internal sealed class AppHost : IDisposable
     {
         try
         {
-            _ = _revoker?.ClearIfUnchanged(sequence);
+            _ = _revoker?.ClearIfUnchanged(sequence, "清空历史");
         }
         catch (Exception ex)
         {
             _log.Error("清空历史后吊销剪贴板失败", ex);
         }
+    }
+
+    // ────────────────────── 敏感内容自动清空（附加项 B-09） ──────────────────────
+
+    /// <summary>
+    /// 排定（或按新内容重排）「敏感内容到点自动清空」。<b>只能在 UI 线程调用</b>（要动 DispatcherTimer）。
+    /// <para>
+    /// 只保留最近一次排定：又复制了一条敏感内容就按新时间重新计时。
+    /// </para>
+    /// </summary>
+    /// <param name="plan">排定结果。</param>
+    private void ArmSensitiveClear(SensitiveClearPlan plan)
+    {
+        var remaining = plan.Deadline - DateTimeOffset.Now;
+        if (remaining < TimeSpan.Zero)
+        {
+            remaining = TimeSpan.Zero;
+        }
+
+        _sensitiveClearSequence = plan.Sequence;
+        _sensitiveClearTimer.Stop();
+        _sensitiveClearTimer.Interval = remaining;
+        _sensitiveClearTimer.Start();
+
+        _log.Diag($"敏感内容计时：{plan.Minutes} 分钟后自动清空剪贴板（剩余 {remaining.TotalSeconds:F0}s）");
+    }
+
+    /// <summary>取消已排定的敏感内容清空（关闭功能、或当前剪贴板已不含敏感信息）。</summary>
+    /// <param name="reason">取消原因（进日志）。</param>
+    private void CancelSensitiveClear(string reason)
+    {
+        if (_sensitiveClearSequence < 0 && !_sensitiveClearTimer.IsEnabled)
+        {
+            return;
+        }
+
+        _sensitiveClearTimer.Stop();
+        _sensitiveClearSequence = -1;
+        _log.Diag("取消敏感内容自动清空：" + reason);
+    }
+
+    /// <summary>
+    /// 到点执行：只有当剪贴板里仍是当初那条内容时才清空（序列号复核在剪贴板锁内完成，
+    /// 所以"这段时间用户又复制了别的东西"时什么都不会发生）。
+    /// </summary>
+    private void OnSensitiveClearDue()
+    {
+        _sensitiveClearTimer.Stop();
+
+        var sequence = _sensitiveClearSequence;
+        _sensitiveClearSequence = -1;
+        if (sequence < 0)
+        {
+            return;
+        }
+
+        try
+        {
+            var result = _revoker?.ClearIfUnchanged(sequence, "敏感内容定时清空");
+            if (result is null)
+            {
+                return;
+            }
+
+            switch (result.Status)
+            {
+                case RevokeStatus.Revoked:
+                    _panel?.SetActionHint("已自动清空含敏感信息的剪贴板");
+                    break;
+
+                case RevokeStatus.Failed:
+                    _panel?.SetActionHint("剪贴板被其它程序占用，未能自动清空敏感内容");
+                    break;
+
+                default:
+                    // 内容早被换掉了：本次作废，静默（用户已经复制了新东西，不该再打扰）。
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.Error("敏感内容自动清空失败", ex);
+        }
+    }
+
+    /// <summary>
+    /// 设置生效（B-09）：关闭则取消已排定；开启则按<b>当前剪贴板</b>重新排定一次 ——
+    /// 这样刚打开开关时，手里正握着的那条敏感内容也会被清掉，而不是等下一次复制。
+    /// </summary>
+    private void ApplySensitiveClearSetting()
+    {
+        if (_settings.ClearSensitiveAfterMinutes <= 0)
+        {
+            CancelSensitiveClear("设置里已关闭");
+            return;
+        }
+
+        var clipboard = _clipboard;
+        if (clipboard is null)
+        {
+            return;
+        }
+
+        // 读剪贴板必须在 STA 线程 —— 本方法只从 UI 线程调用（ApplySettings 的运行路径）。
+        if (!clipboard.TryReadPayloadWithSequence(out var payload, out var sequence, out var error) || payload is null)
+        {
+            if (!string.IsNullOrEmpty(error))
+            {
+                _log.Diag("敏感内容排定：读剪贴板失败（" + error + "）");
+            }
+
+            return;
+        }
+
+        var plan = SensitiveClearPlanner.Plan(payload, _settings.ClearSensitiveAfterMinutes, sequence, DateTimeOffset.Now);
+        if (plan is null)
+        {
+            CancelSensitiveClear("当前剪贴板不含敏感信息");
+            return;
+        }
+
+        ArmSensitiveClear(plan);
     }
 
     /// <summary>
@@ -1206,7 +1352,7 @@ internal sealed class AppHost : IDisposable
             $"设置已更新 | maxItems={_settings.MaxItems} diskQuotaMb={_settings.DiskQuotaMb} hotkey={_settings.Hotkey} "
             + $"autoStart={_settings.AutoStart}({_settings.AutoStartDelaySeconds}s) captureImages={_settings.CaptureImages} "
             + $"maskSensitive={_settings.MaskSensitiveData} clearClipboardOnDelete={_settings.ClearClipboardOnDelete} "
-            + $"theme={_settings.Theme}");
+            + $"sensitiveClearMinutes={_settings.ClearSensitiveAfterMinutes} theme={_settings.Theme}");
 
         // 1) 脱敏开关（D-13）
         _masker = _settings.MaskSensitiveData ? new SensitiveMasker(true) : SensitiveMasker.Disabled;
@@ -1261,6 +1407,9 @@ internal sealed class AppHost : IDisposable
                 _backgroundGate.Release();
             }
         });
+
+        // 9) 敏感内容自动清空（B-09）：关闭立即取消；开启则按「当前剪贴板」重新排定一次
+        ApplySensitiveClearSetting();
     }
 
     private void ReRegisterHotkey(string hotkey)

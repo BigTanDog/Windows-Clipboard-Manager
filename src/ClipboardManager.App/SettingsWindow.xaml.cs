@@ -30,6 +30,10 @@ public partial class SettingsWindow : Window
     /// <summary>主题档位文案（与 <see cref="ThemeResolver"/> 取值一一对应）。</summary>
     private static readonly string[] ThemeLabels = ["跟随系统", "浅色", "深色"];
 
+    /// <summary>敏感内容自动清空的档位文案（由档位数组生成，顺序天然一致）。</summary>
+    private static readonly string[] SensitiveClearLabels =
+        [.. AppSettings.SensitiveClearMinutesOptions.Select(AppSettings.SensitiveClearLabel)];
+
     private static readonly string[] ThemeValues = [ThemeResolver.System, ThemeResolver.Light, ThemeResolver.Dark];
 
     private readonly ObservableCollection<string> _excludedApps = [];
@@ -70,11 +74,15 @@ public partial class SettingsWindow : Window
         MaxItemsBox.ItemsSource = MaxItemsLabels;
         DiskQuotaBox.ItemsSource = DiskQuotaLabels;
         ThemeBox.ItemsSource = ThemeLabels;
+        SensitiveClearBox.ItemsSource = SensitiveClearLabels;
         ExcludedListBox.ItemsSource = _excludedApps;
 
         MaxItemsBox.SelectedIndex = Math.Max(0, Array.IndexOf(AppSettings.MaxItemsOptions, current.MaxItems));
         DiskQuotaBox.SelectedIndex = Math.Max(0, Array.IndexOf(AppSettings.DiskQuotaMbOptions, current.DiskQuotaMb));
         ThemeBox.SelectedIndex = Math.Max(0, Array.IndexOf(ThemeValues, current.Theme));
+        SensitiveClearBox.SelectedIndex = Math.Max(
+            0,
+            Array.IndexOf(AppSettings.SensitiveClearMinutesOptions, current.ClearSensitiveAfterMinutes));
 
         CaptureImagesBox.IsChecked = current.CaptureImages;
         AutoPasteBox.IsChecked = current.AutoPaste;
@@ -404,7 +412,10 @@ public partial class SettingsWindow : Window
         settings = null;
         error = null;
 
-        if (MaxItemsBox.SelectedIndex < 0 || DiskQuotaBox.SelectedIndex < 0 || ThemeBox.SelectedIndex < 0)
+        if (MaxItemsBox.SelectedIndex < 0
+            || DiskQuotaBox.SelectedIndex < 0
+            || ThemeBox.SelectedIndex < 0
+            || SensitiveClearBox.SelectedIndex < 0)
         {
             error = "请选择所有档位";
             return false;
@@ -444,6 +455,7 @@ public partial class SettingsWindow : Window
             HideOnClickOutside = HideOnClickOutsideBox.IsChecked == true,
             SingleClickPaste = SingleClickPasteBox.IsChecked == true,
             ClearClipboardOnDelete = ClearClipboardOnDeleteBox.IsChecked == true,
+            ClearSensitiveAfterMinutes = AppSettings.SensitiveClearMinutesOptions[SensitiveClearBox.SelectedIndex],
             AcrylicStrength = (int)Math.Round(AcrylicSlider.Value),
         }.Normalize();
 

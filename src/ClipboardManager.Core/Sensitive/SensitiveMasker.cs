@@ -60,26 +60,7 @@ public sealed class SensitiveMasker
 
         var truncated = input.Length > MaxScanChars;
         var text = truncated ? input[..MaxScanChars] : input;
-
-        List<MaskEdit>? edits = null;
-        foreach (var rule in Rules)
-        {
-            foreach (Match match in rule.Pattern.Matches(text))
-            {
-                if (Overlaps(edits, match.Index, match.Length))
-                {
-                    continue;
-                }
-
-                var replacement = rule.BuildReplacement(match, text);
-                if (replacement is null)
-                {
-                    continue;
-                }
-
-                (edits ??= []).Add(new MaskEdit(match.Index, match.Length, replacement));
-            }
-        }
+        var edits = CollectEdits(text);
 
         if (edits is null || edits.Count == 0)
         {
@@ -104,6 +85,53 @@ public sealed class SensitiveMasker
         }
 
         return builder.ToString();
+    }
+
+    /// <summary>
+    /// 判定一段文本是否含敏感信息（供「敏感内容复制后自动清空剪贴板」使用，附加项 B-09）。
+    /// <para>
+    /// <b>与脱敏显示共用同一套规则与边界判定</b>，保证"显示上会被打码的内容"与"会被自动清空的内容"口径一致。
+    /// 注意它是 <c>static</c>：<b>不受实例 <see cref="Enabled"/> 影响</b> —— 用户关掉「脱敏显示」不该让
+    /// 自动清空失效，两者是彼此独立的开关。
+    /// </para>
+    /// </summary>
+    /// <param name="input">待判定文本（可为 null）。</param>
+    public static bool ContainsSensitive(string? input)
+    {
+        if (string.IsNullOrEmpty(input))
+        {
+            return false;
+        }
+
+        // 与 Mask 一致：只扫描前 MaxScanChars 个字符（线性时间，避免超大文本拖慢）。
+        var text = input.Length > MaxScanChars ? input[..MaxScanChars] : input;
+        return CollectEdits(text) is { Count: > 0 };
+    }
+
+    /// <summary>收集脱敏区间 —— <see cref="Mask"/> 与 <see cref="ContainsSensitive"/> 唯一的规则执行处。</summary>
+    private static List<MaskEdit>? CollectEdits(string text)
+    {
+        List<MaskEdit>? edits = null;
+        foreach (var rule in Rules)
+        {
+            foreach (Match match in rule.Pattern.Matches(text))
+            {
+                if (Overlaps(edits, match.Index, match.Length))
+                {
+                    continue;
+                }
+
+                var replacement = rule.BuildReplacement(match, text);
+                if (replacement is null)
+                {
+                    continue;
+                }
+
+                (edits ??= []).Add(new MaskEdit(match.Index, match.Length, replacement));
+            }
+        }
+
+        return edits;
     }
 
     /// <summary>判定区间是否与已脱敏区间重叠（区间数很少，线性扫描足够）。</summary>

@@ -16,7 +16,7 @@
     <!-- 应用版本（单一来源）：决定 exe 的「文件版本/产品版本」属性，并由设置窗口底部展示（AppVersion）。
          版本约定（用户 2026-09-19 定）：普通改动只 +1 最后一位（1.1.0 → 1.1.1）；
          加了较大功能再升中间位（1.2.0）。改这里就够了，不要在别处重复写版本号。 -->
-    <Version>1.1.0</Version>
+    <Version>1.1.1</Version>
     <!-- 不要在「产品版本」里附上 git 提交号（默认会变成 1.1.0+<sha>，属性对话框里很难看） -->
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <Product>剪贴板管理器</Product>

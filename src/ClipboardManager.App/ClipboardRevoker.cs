@@ -75,7 +75,7 @@ internal sealed class ClipboardRevoker
         if (_presence.IsCurrent(deleted.Id, live))
         {
             _log.Diag($"吊销判定：记账命中（id={deleted.Id} 序列号={live}）");
-            return Clear(live, viaFingerprint: false);
+            return Clear(live, "删除即吊销", "记账命中");
         }
 
         _log.Diag(
@@ -107,7 +107,7 @@ internal sealed class ClipboardRevoker
             return new RevokeResult(RevokeStatus.NotCurrent, null);
         }
 
-        return Clear(readSequence, viaFingerprint: true);
+        return Clear(readSequence, "删除即吊销", "内容指纹");
     }
 
     /// <summary>
@@ -141,33 +141,43 @@ internal sealed class ClipboardRevoker
         return true;
     }
 
-    /// <summary>序列号未变才清空（「清空历史」删除完成后调用）。</summary>
-    /// <param name="sequence"><see cref="HoldsTrackedRecord"/> 返回的序列号。</param>
-    public RevokeResult ClearIfUnchanged(long sequence) => Clear(sequence, viaFingerprint: true);
+    /// <summary>
+    /// 序列号未变才清空 —— 调用方已经自己判定过"该内容属于我们"（如「清空历史」删除完成后、
+    /// 敏感内容到点自动清空），这里只剩"内容有没有被换掉"这一道复核。
+    /// </summary>
+    /// <param name="sequence">判定时该内容对应的序列号。</param>
+    /// <param name="reason">用途（进日志与提示）。</param>
+    public RevokeResult ClearIfUnchanged(long sequence, string reason) =>
+        Clear(sequence, reason, "序列号复核");
 
     /// <summary>哈希只用于日志对照：截断到前 8 位，<b>绝不记录内容本身</b>（AGENTS.md §4）。</summary>
     private static string ShortHash(string? hash) => hash is null ? "无" : hash[..Math.Min(8, hash.Length)];
 
-    private RevokeResult Clear(long expectedSequence, bool viaFingerprint)
+    /// <summary>
+    /// 清空剪贴板的统一出口：序列号不符（内容已被换掉）就放弃。
+    /// </summary>
+    /// <param name="expectedSequence">期望的剪贴板序列号。</param>
+    /// <param name="reason">用途/触发来源，进日志（如「删除即吊销」「敏感内容定时清空」「清空历史」）。</param>
+    /// <param name="route">判定路径说明，进日志。</param>
+    private RevokeResult Clear(long expectedSequence, string reason, string route)
     {
         var result = _clipboard.TryClearIfSequence(expectedSequence);
-        var route = viaFingerprint ? "内容指纹" : "记账命中";
 
         switch (result.Status)
         {
             case ClipboardClearStatus.Cleared:
                 _presence.Reset();
-                _log.Info($"删除即吊销：已清空系统剪贴板（判定路径={route}）");
-                return new RevokeResult(RevokeStatus.Revoked, null, viaFingerprint);
+                _log.Info($"{reason}：已清空系统剪贴板（判定路径={route}）");
+                return new RevokeResult(RevokeStatus.Revoked, null);
 
             case ClipboardClearStatus.SequenceChanged:
                 // 判定之后剪贴板已被别的程序改写：宁可漏清，也不能毁掉用户的新内容。
-                _log.Diag($"删除即吊销：判定后剪贴板已变化（路径={route}），保持不动");
-                return new RevokeResult(RevokeStatus.NotCurrent, null, viaFingerprint);
+                _log.Diag($"{reason}：判定后剪贴板已变化（路径={route}），保持不动");
+                return new RevokeResult(RevokeStatus.NotCurrent, null);
 
             default:
-                _log.Error("删除即吊销失败：" + result.Error);
-                return new RevokeResult(RevokeStatus.Failed, result.Error, viaFingerprint);
+                _log.Error($"{reason}失败：" + result.Error);
+                return new RevokeResult(RevokeStatus.Failed, result.Error);
         }
     }
 }
