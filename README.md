@@ -8,10 +8,12 @@ Windows 剪贴板历史工具：常驻托盘，按快捷键唤出面板，自动
 
 ## 下载
 
+> 文件名里的 `_vX.Y.Z` 就是版本号 —— 与设置窗口最下方显示的版本一致，下载前可以对照一下。
+
 | 文件 | 体积 | 适合谁 |
 | --- | --- | --- |
-| [ClipboardManager_小体积_需装NET8运行时.exe](release/ClipboardManager_小体积_需装NET8运行时.exe) | 2.85 MB | 电脑上装过 [.NET 8 桌面运行时](https://dotnet.microsoft.com/download/dotnet/8.0)（日常使用推荐，文件小） |
-| [ClipboardManager_完整版_免装运行时.exe](release/ClipboardManager_完整版_免装运行时.exe) | 64.39 MB | 什么都不想装：拷到 U 盘或新电脑，双击就用 |
+| [ClipboardManager_小体积_需装NET8运行时_v1.1.2.exe](release/ClipboardManager_小体积_需装NET8运行时_v1.1.2.exe) | 2.88 MB | 电脑上装过 [.NET 8 桌面运行时](https://dotnet.microsoft.com/download/dotnet/8.0)（日常使用推荐，文件小） |
+| [ClipboardManager_完整版_免装运行时_v1.1.2.exe](release/ClipboardManager_完整版_免装运行时_v1.1.2.exe) | 64.41 MB | 什么都不想装：拷到 U 盘或新电脑，双击就用 |
 
 > 第一次运行如果没看到托盘图标，多半被 Windows 收进了「隐藏的图标」（任务栏右下角的 ^ 里），把它拖出来即可。
 
