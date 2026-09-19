@@ -140,6 +140,80 @@ public sealed record HotkeySpec(HotkeyModifiers Modifiers, uint VirtualKey)
         return true;
     }
 
+    /// <summary>
+    /// 由「按下的主键 + 修饰键」构造热键（供设置页"按键录制"使用，免去手工敲字母）。
+    /// </summary>
+    /// <param name="virtualKey">主键虚拟键码。</param>
+    /// <param name="modifiers">按下的修饰键。</param>
+    /// <param name="spec">构造结果（失败为 null）。</param>
+    /// <param name="error">失败原因（成功时为 null）。</param>
+    /// <returns>是否构造成功。</returns>
+    public static bool TryCreate(uint virtualKey, HotkeyModifiers modifiers, out HotkeySpec? spec, out string? error)
+    {
+        spec = null;
+        error = null;
+
+        if (modifiers == HotkeyModifiers.None)
+        {
+            error = "请按住 Ctrl / Shift / Alt / Win 再按一个键";
+            return false;
+        }
+
+        if (!IsSupportedKey(virtualKey))
+        {
+            error = "这个键不支持作为热键，请换一个";
+            return false;
+        }
+
+        spec = new HotkeySpec(modifiers, virtualKey);
+        return true;
+    }
+
+    /// <summary>
+    /// 该虚拟键是否有可读名字 —— 必须保证 <see cref="ToString"/> 的产物能被
+    /// <see cref="TryParse"/> 解析回来（否则"录进去的键"保存后读不回来）。
+    /// </summary>
+    public static bool IsSupportedKey(uint virtualKey)
+    {
+        if (virtualKey is >= 'A' and <= 'Z' or >= '0' and <= '9' or >= 0x70 and <= 0x87)
+        {
+            return true;
+        }
+
+        foreach (var value in NamedKeys.Values)
+        {
+            if (value == virtualKey)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// 命名键的展示写法：键名表里都是大写（PAGEUP），给用户看要好看些（PageUp）。
+    /// 只影响 <see cref="ToString"/> 的输出，<see cref="TryParse"/> 仍大小写不敏感。
+    /// </summary>
+    private static readonly Dictionary<string, string> KeyDisplayNames = new(StringComparer.Ordinal)
+    {
+        ["SPACE"] = "Space",
+        ["ENTER"] = "Enter",
+        ["TAB"] = "Tab",
+        ["ESC"] = "Esc",
+        ["BACKSPACE"] = "Backspace",
+        ["DELETE"] = "Delete",
+        ["INSERT"] = "Insert",
+        ["HOME"] = "Home",
+        ["END"] = "End",
+        ["PAGEUP"] = "PageUp",
+        ["PAGEDOWN"] = "PageDown",
+        ["UP"] = "Up",
+        ["DOWN"] = "Down",
+        ["LEFT"] = "Left",
+        ["RIGHT"] = "Right",
+    };
+
     /// <inheritdoc />
     public override string ToString()
     {
@@ -213,7 +287,16 @@ public sealed record HotkeySpec(HotkeyModifiers Modifiers, uint VirtualKey)
             return "F" + (virtualKey - 0x70 + 1);
         }
 
-        // 先找多字符别名（Enter / PageUp / F1 这类更具可读性），再回退到单字符符号（` - = [ ] \ ; ' , . /）。
+        // 优先给"有展示写法"的命名键（Enter / PageUp 这类，同时避开 RETURN / DEL / ESCAPE 之类的别名），
+        // 再回退到多字符别名，最后回退到单字符符号（` - = [ ] \ ; ' , . /）。
+        foreach (var pair in NamedKeys)
+        {
+            if (pair.Value == virtualKey && KeyDisplayNames.TryGetValue(pair.Key, out var display))
+            {
+                return display;
+            }
+        }
+
         foreach (var pair in NamedKeys)
         {
             if (pair.Value == virtualKey && pair.Key.Length > 1)

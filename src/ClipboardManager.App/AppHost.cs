@@ -955,6 +955,10 @@ internal sealed class AppHost : IDisposable
         try
         {
             var window = new SettingsWindow(_settings, MeasureDiskUsage, Storage.AppPaths.BlobDirectory, PreviewAcrylic);
+
+            // 录制快捷键时必须先摘掉全局热键：否则按下的组合会被系统直接吞掉（录不到），
+            // 还会顺带把面板切出来。
+            window.HotkeyRecordingChanged += OnHotkeyRecordingChanged;
             _ = window.ShowDialog();
 
             if (window.Result is { } updated)
@@ -966,6 +970,20 @@ internal sealed class AppHost : IDisposable
         {
             _log.Error("打开设置窗口失败", ex);
         }
+    }
+
+    /// <summary>设置页进入/退出快捷键录制：暂停与恢复全局热键。</summary>
+    private void OnHotkeyRecordingChanged(bool recording)
+    {
+        if (recording)
+        {
+            _hotkeys?.Unregister();
+            _log.Diag("快捷键录制开始：暂停全局热键");
+            return;
+        }
+
+        _log.Diag("快捷键录制结束：恢复全局热键");
+        ReRegisterHotkey(_settings.Hotkey);
     }
 
     /// <summary>统计当前磁盘占用（设置窗口在后台线程调用；仓储自带锁，跨线程安全）。</summary>

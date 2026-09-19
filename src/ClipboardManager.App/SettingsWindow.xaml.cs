@@ -1,7 +1,9 @@
 using System.Collections.ObjectModel;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Interop;
+using System.Windows.Media;
 using System.Windows.Threading;
 using ClipboardManager.App.Theme;
 using ClipboardManager.Core.Hotkeys;
@@ -39,6 +41,8 @@ public partial class SettingsWindow : Window
     private readonly DispatcherTimer _usageTimer;
     private bool _usageBusy;
     private bool _themeReverted;
+    private bool _recordingHotkey;
+    private string _hotkeyBeforeRecording = string.Empty;
 
     /// <summary>创建设置窗口。</summary>
     /// <param name="current">当前设置（用于回显）。</param>
@@ -181,6 +185,141 @@ public partial class SettingsWindow : Window
         var strength = (int)Math.Round(e.NewValue);
         AcrylicValueText.Text = strength <= 0 ? "0（不透明）" : strength.ToString(System.Globalization.CultureInfo.InvariantCulture);
         _previewAcrylic(strength);
+    }
+
+    // ─────────────── 全局快捷键：按键录制 ───────────────
+
+    /// <summary>
+    /// 快捷键进入 / 退出录制状态。
+    /// 宿主收到 <c>true</c> 必须**先注销全局热键**，否则录制时按下的组合会被系统直接吞掉、
+    /// 根本到不了这里（也会顺带把面板切出来）。
+    /// </summary>
+    public event Action<bool>? HotkeyRecordingChanged;
+
+    /// <summary>录制中的提示文案（也是"当前没有有效组合"的判据）。</summary>
+    private const string RecordingPlaceholder = "请按下组合键…（Esc 取消）";
+
+    /// <summary>快捷键框获得焦点：进入录制状态。</summary>
+    private void OnHotkeyBoxGotFocus(object sender, RoutedEventArgs e) => StartHotkeyRecording();
+
+    /// <summary>
+    /// 鼠标按下也进入录制：录制成功后会停止录制，此时框仍然有焦点，
+    /// 再点一次不会触发 GotFocus —— 不补这个入口用户就会觉得"第二次点没反应"。
+    /// 注意不要设置 <c>e.Handled</c>，否则点击无法把焦点交给输入框。
+    /// </summary>
+    private void OnHotkeyBoxMouseDown(object sender, MouseButtonEventArgs e) => StartHotkeyRecording();
+
+    private void StartHotkeyRecording()
+    {
+        if (_recordingHotkey)
+        {
+            return;
+        }
+
+        _recordingHotkey = true;
+        _hotkeyBeforeRecording = HotkeyBox.Text;
+        HotkeyBox.Text = RecordingPlaceholder;
+        HotkeyBox.BorderBrush = (Brush)FindResource("AccentBrush");
+        HotkeyRecordingChanged?.Invoke(true);
+    }
+
+    /// <summary>失去焦点：结束录制（没录到有效组合就还原原值）。</summary>
+    private void OnHotkeyBoxLostFocus(object sender, RoutedEventArgs e) => StopHotkeyRecording();
+
+    /// <summary>录制中：把按下的键组合翻译成热键文本。</summary>
+    private void OnHotkeyBoxPreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (!_recordingHotkey)
+        {
+            return;
+        }
+
+        e.Handled = true;
+
+        // Alt 组合下主键会走 SystemKey（Key.System），否则拿到的是修饰键本身
+        var key = e.Key == Key.System ? e.SystemKey : e.Key;
+
+        if (key == Key.Escape)
+        {
+            CancelHotkeyRecording();
+            return;
+        }
+
+        if (key is Key.None or Key.LeftCtrl or Key.RightCtrl or Key.LeftShift or Key.RightShift
+            or Key.LeftAlt or Key.RightAlt or Key.LWin or Key.RWin)
+        {
+            // 只按了修饰键：继续等主键
+            HotkeyBox.Text = "请再按一个键…（Esc 取消）";
+            return;
+        }
+
+        var virtualKey = (uint)KeyInterop.VirtualKeyFromKey(key);
+        if (HotkeySpec.TryCreate(virtualKey, CurrentModifiers(), out var spec, out var error) && spec is not null)
+        {
+            HotkeyBox.Text = spec.ToString();
+            _hotkeyBeforeRecording = HotkeyBox.Text;
+            StatusText.Text = "快捷键已更新为 " + HotkeyBox.Text + "（保存后生效）";
+        }
+        else
+        {
+            HotkeyBox.Text = error ?? "组合键无效";
+        }
+
+        StopHotkeyRecording();
+    }
+
+    /// <summary>当前按下的修饰键。</summary>
+    private static HotkeyModifiers CurrentModifiers()
+    {
+        var modifiers = Keyboard.Modifiers;
+        var result = HotkeyModifiers.None;
+
+        if (modifiers.HasFlag(ModifierKeys.Control))
+        {
+            result |= HotkeyModifiers.Control;
+        }
+
+        if (modifiers.HasFlag(ModifierKeys.Shift))
+        {
+            result |= HotkeyModifiers.Shift;
+        }
+
+        if (modifiers.HasFlag(ModifierKeys.Alt))
+        {
+            result |= HotkeyModifiers.Alt;
+        }
+
+        if (modifiers.HasFlag(ModifierKeys.Windows))
+        {
+            result |= HotkeyModifiers.Win;
+        }
+
+        return result;
+    }
+
+    private void CancelHotkeyRecording()
+    {
+        HotkeyBox.Text = _hotkeyBeforeRecording;
+        StopHotkeyRecording();
+    }
+
+    private void StopHotkeyRecording()
+    {
+        if (!_recordingHotkey)
+        {
+            return;
+        }
+
+        _recordingHotkey = false;
+
+        // 还停在提示文案上说明没录到东西：还原原值，避免把提示当热键存下去
+        if (HotkeyBox.Text is RecordingPlaceholder or "请再按一个键…（Esc 取消）")
+        {
+            HotkeyBox.Text = _hotkeyBeforeRecording;
+        }
+
+        HotkeyBox.ClearValue(BorderBrushProperty);
+        HotkeyRecordingChanged?.Invoke(false);
     }
 
     /// <summary>打开缓存目录（图片 / 富文本本体所在位置）。</summary>
