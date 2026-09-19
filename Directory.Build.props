@@ -12,6 +12,16 @@
     <!-- 第一版只交付 win-x64（产品计划 D-12 / Q-4）；显式固定目标平台，
          保证 GetWindowLongPtr 等仅存在于 64 位 user32 的 API 调用语义正确。 -->
     <PlatformTarget>x64</PlatformTarget>
+
+    <!-- 应用版本（单一来源）：决定 exe 的「文件版本/产品版本」属性，并由设置窗口底部展示（AppVersion）。
+         版本约定（用户 2026-09-19 定）：普通改动只 +1 最后一位（1.1.0 → 1.1.1）；
+         加了较大功能再升中间位（1.2.0）。改这里就够了，不要在别处重复写版本号。 -->
+    <Version>1.1.0</Version>
+    <!-- 不要在「产品版本」里附上 git 提交号（默认会变成 1.1.0+<sha>，属性对话框里很难看） -->
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <Product>剪贴板管理器</Product>
+    <AssemblyTitle>剪贴板管理器</AssemblyTitle>
+    <Description>Windows 剪贴板历史管理工具：本地保存、搜索、粘贴，删记录可联动吊销系统剪贴板</Description>
   </PropertyGroup>
 
 </Project>

@@ -204,15 +204,30 @@
                 BorderBrush="{DynamicResource PanelBorderBrush}"
                 BorderThickness="0,1,0,0"
                 Padding="12,10">
-            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                <TextBlock x:Name="StatusText"
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <!-- 当前文件版本（最下方左侧）：版本号来自 Directory.Build.props，见 AppVersion -->
+                <TextBlock x:Name="VersionText"
+                           Grid.Column="0"
                            VerticalAlignment="Center"
-                           Margin="0,0,8,0"
                            FontSize="12"
-                           Foreground="{DynamicResource MutedTextBrush}" />
-                <Button Style="{StaticResource DialogButtonStyle}" Content="取消" Click="OnCancelClick" />
-                <Button Style="{StaticResource AccentButtonStyle}" Content="保存" Click="OnSaveClick" IsDefault="True" />
-            </StackPanel>
+                           Foreground="{DynamicResource MutedTextBrush}"
+                           ToolTip="当前软件版本（对应 exe 的「文件版本」属性）" />
+
+                <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
+                    <TextBlock x:Name="StatusText"
+                               VerticalAlignment="Center"
+                               Margin="0,0,8,0"
+                               FontSize="12"
+                               Foreground="{DynamicResource MutedTextBrush}" />
+                    <Button Style="{StaticResource DialogButtonStyle}" Content="取消" Click="OnCancelClick" />
+                    <Button Style="{StaticResource AccentButtonStyle}" Content="保存" Click="OnSaveClick" IsDefault="True" />
+                </StackPanel>
+            </Grid>
         </Border>
     </Grid>
 </Window>

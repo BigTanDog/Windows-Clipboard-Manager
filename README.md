@@ -85,7 +85,16 @@ Windows 的剪贴板历史由系统自己保管，系统没有提供"按条目�
 **历史记录是加密的吗？**
 不是。数据以明文保存在本机 `data\` 里，脱敏只是"屏幕上不显示全"。请自行注意电脑的物理安全。
 
-## 从源码构建 / 参与开发
+## 从源码构建
 
-见 [docs/开发者指南.md](docs/开发者指南.md)（构建、测试、发布、架构与设计决策），
-产品设计决策与附加项进展见 [docs/产品计划文档.md](docs/产品计划文档.md)。
+需要 .NET 8 SDK（含 Windows Desktop）。在仓库根目录：
+
+```powershell
+.\scripts\build.ps1      # 构建
+.\scripts\test.ps1       # 跑测试
+.\scripts\publish-fd.ps1 # 发布：小体积单文件（目标机需装 .NET 8 桌面运行时）
+.\scripts\publish-sc.ps1 # 发布：免运行时单文件（体积较大）
+```
+
+产物在 `artifacts/` 下（`小体积-需装运行时` / `大体积-免运行时`）。
+版本号集中在 `Directory.Build.props` 的 `<Version>`，设置窗口最下方会显示当前版本。

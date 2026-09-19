@@ -64,6 +64,9 @@ public partial class SettingsWindow : Window
 
         InitializeComponent();
 
+        // 底部版本号：用户要求设置窗口最下方能看到当前文件版本（版本号只来自 Directory.Build.props）。
+        VersionText.Text = "版本 " + AppVersion.Display;
+
         MaxItemsBox.ItemsSource = MaxItemsLabels;
         DiskQuotaBox.ItemsSource = DiskQuotaLabels;
         ThemeBox.ItemsSource = ThemeLabels;
