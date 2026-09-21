@@ -62,11 +62,13 @@
 
             <!-- 搜索框 -->
             <Grid Grid.Row="1" Margin="12,8,12,4">
+                <!-- 底色不用 DynamicResource：它必须跟随「面板透明度」由代码统一计算
+                     （见 PanelWindow.ApplyAcrylic / SearchBackground），否则它会是面板上唯一一块实心色块。 -->
                 <TextBox x:Name="SearchBox"
                          Padding="6,4"
                          BorderBrush="{DynamicResource PanelBorderBrush}"
                          BorderThickness="1"
-                         Background="{DynamicResource ControlBackgroundBrush}"
+                         Background="{Binding SearchBackground, RelativeSource={RelativeSource AncestorType=Window}}"
                          Foreground="{DynamicResource PrimaryTextBrush}"
                          CaretBrush="{DynamicResource PrimaryTextBrush}"
                          TextChanged="OnSearchTextChanged"

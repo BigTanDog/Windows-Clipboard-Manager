@@ -12,8 +12,8 @@ Windows 剪贴板历史工具：常驻托盘，按快捷键唤出面板，自动
 
 | 文件 | 体积 | 适合谁 |
 | --- | --- | --- |
-| [ClipboardManager_小体积_需装NET8运行时_v1.1.2.exe](release/ClipboardManager_小体积_需装NET8运行时_v1.1.2.exe) | 2.88 MB | 电脑上装过 [.NET 8 桌面运行时](https://dotnet.microsoft.com/download/dotnet/8.0)（日常使用推荐，文件小） |
-| [ClipboardManager_完整版_免装运行时_v1.1.2.exe](release/ClipboardManager_完整版_免装运行时_v1.1.2.exe) | 64.41 MB | 什么都不想装：拷到 U 盘或新电脑，双击就用 |
+| [ClipboardManager_小体积_需装NET8运行时_v1.1.3.exe](release/ClipboardManager_小体积_需装NET8运行时_v1.1.3.exe) | 2.88 MB | 电脑上装过 [.NET 8 桌面运行时](https://dotnet.microsoft.com/download/dotnet/8.0)（日常使用推荐，文件小） |
+| [ClipboardManager_完整版_免装运行时_v1.1.3.exe](release/ClipboardManager_完整版_免装运行时_v1.1.3.exe) | 64.41 MB | 什么都不想装：拷到 U 盘或新电脑，双击就用 |
 
 > 第一次运行如果没看到托盘图标，多半被 Windows 收进了「隐藏的图标」（任务栏右下角的 ^ 里），把它拖出来即可。
 
@@ -35,6 +35,8 @@ Windows 剪贴板历史工具：常驻托盘，按快捷键唤出面板，自动
 ## 它能做什么
 
 - **四类内容都认得**：文字、网址（有单独标识）、图片（带缩略图）、文件（显示文件名），每类有自己的颜色标记。
+  连**从资源管理器复制的单张图片文件**（png / jpg / gif / bmp / webp…）也会直接显示成缩略图，一眼就能认出是哪张图
+  —— 但粘贴出去的仍然是**文件本身**，行为没有任何变化。
 - **搜索**：按内容或文件名即时过滤。
 - **收藏**：常用内容右键收藏，收藏的条目永远不会被自动清理。
 - **删除即吊销**：删掉一条记录时，如果系统剪贴板里装的**正是它**，剪贴板会一并清空 —— 桌面右键的「粘贴」立刻变灰，

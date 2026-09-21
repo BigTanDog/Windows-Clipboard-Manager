@@ -134,6 +134,87 @@ internal static class PngEncoder
         }
     }
 
+    /// <summary>从磁盘图片文件生成缩略图时的像素上限（4000 万像素）——超过直接放弃，绝不整图解码。</summary>
+    public const long ThumbnailSourceMaxPixels = 40_000_000;
+
+    /// <summary>
+    /// 从磁盘上的图片文件生成缩略图 PNG（用于"复制的是一张图片文件"的场景）。
+    /// <para>
+    /// 与 <see cref="TryCreateThumbnail"/> 的两点区别：① <b>先只读文件头拿尺寸</b>，超过
+    /// <see cref="ThumbnailSourceMaxPixels"/> 的巨图直接放弃（不把整图读进内存）；
+    /// ② <b>始终重新编码为 PNG</b> —— 原图可能是 JPEG/BMP，直接复用会让扩展名与内容不符。
+    /// </para>
+    /// <para>
+    /// 返回 null 表示"生成不了"（格式不支持 / 文件已被移动 / 太大），调用方退化为按普通文件显示即可，
+    /// <b>不抛异常</b>。绝不锁定文件（<c>OnLoad</c> + 读完即关闭）。
+    /// </para>
+    /// </summary>
+    /// <param name="path">图片文件绝对路径。</param>
+    public static byte[]? TryCreateThumbnailFromFile(string? path)
+    {
+        if (string.IsNullOrEmpty(path) || !File.Exists(path))
+        {
+            return null;
+        }
+
+        try
+        {
+            int sourceWidth;
+            int sourceHeight;
+
+            // 只读文件头拿尺寸（BitmapCacheOption.None 不会整图解码）。
+            using (var probe = File.OpenRead(path))
+            {
+                var decoder = BitmapDecoder.Create(probe, BitmapCreateOptions.None, BitmapCacheOption.None);
+                var frame = decoder.Frames[0];
+                sourceWidth = frame.PixelWidth;
+                sourceHeight = frame.PixelHeight;
+            }
+
+            if (sourceWidth <= 0 || sourceHeight <= 0 || (long)sourceWidth * sourceHeight > ThumbnailSourceMaxPixels)
+            {
+                return null;
+            }
+
+            var image = new BitmapImage();
+            image.BeginInit();
+            image.CacheOption = BitmapCacheOption.OnLoad;
+            image.CreateOptions = BitmapCreateOptions.PreservePixelFormat;
+
+            // 按长边限制设置解码尺寸，避免大图全尺寸解码进内存。
+            if (Math.Max(sourceWidth, sourceHeight) > ThumbnailMaxEdge)
+            {
+                if (sourceWidth >= sourceHeight)
+                {
+                    image.DecodePixelWidth = ThumbnailMaxEdge;
+                }
+                else
+                {
+                    image.DecodePixelHeight = ThumbnailMaxEdge;
+                }
+            }
+
+            using (var stream = File.OpenRead(path))
+            {
+                image.StreamSource = stream;
+                image.EndInit();
+            }
+
+            image.Freeze();
+
+            var encoder = new PngBitmapEncoder();
+            encoder.Frames.Add(BitmapFrame.Create(image));
+            using var output = new MemoryStream();
+            encoder.Save(output);
+            return output.ToArray();
+        }
+        catch (Exception ex) when (ex is NotSupportedException or FileFormatException or ArgumentException
+            or IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
     /// <summary>
     /// 以「加载后即可关闭文件」的方式读取图片（<c>OnLoad</c> + <c>Freeze</c>）。
     /// 关键：绝不使用默认的文件加载（会锁定文件，导致删除记录时删不掉）。

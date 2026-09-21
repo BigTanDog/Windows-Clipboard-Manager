@@ -37,11 +37,11 @@ public sealed class ClipItemViewModel
 
         Source = source;
         TypeLabel = PreviewBuilder.TypeLabel(source.Type);
-        KindKey = ResolveKind(source);
-        KindLabel = KindLabelFor(KindKey, TypeLabel);
-        TimeText = RelativeTime.Format(source.UpdatedAt, now);
         ThumbnailPath = thumbnailPath;
         HasThumbnail = !string.IsNullOrEmpty(thumbnailPath);
+        KindKey = ResolveKind(source, HasThumbnail);
+        KindLabel = KindLabelFor(KindKey, TypeLabel);
+        TimeText = RelativeTime.Format(source.UpdatedAt, now);
         IsPinned = source.IsPinned;
         IsCurrentInClipboard = isCurrentClipboardItem;
 
@@ -72,15 +72,27 @@ public sealed class ClipItemViewModel
     /// <summary>种类徽标文字（与 <see cref="KindKey"/> 对应，网址会显示「网站」）。</summary>
     public string KindLabel { get; }
 
-    /// <summary>判定种类：识别出单个网址时归为 Link（网站），其余按内容类型。</summary>
-    private static string ResolveKind(ClipItem source)
+    /// <summary>
+    /// 判定种类（<b>只影响显示</b>）：单个图片文件 → Image；单个网址 → Link；其余按内容类型。
+    /// </summary>
+    /// <param name="source">原始记录。</param>
+    /// <param name="hasThumbnail">是否已有可显示的缩略图（文件记录只有成功生成缩略图时才按图片显示）。</param>
+    private static string ResolveKind(ClipItem source, bool hasThumbnail)
     {
+        if (source.Type == ClipContentType.FileList)
+        {
+            // 单个图片文件：像截图那样按「图片」显示，但正文仍写着「1 个文件：xxx.png」，
+            // 粘贴出去的也仍然是文件本身（存储类型不变）。
+            return hasThumbnail && ImageFileExtensions.TryGetSingleImageFile(source.FilePaths) is not null
+                ? "Image"
+                : "File";
+        }
+
         if (source.Type != ClipContentType.Text)
         {
             return source.Type switch
             {
                 ClipContentType.Image => "Image",
-                ClipContentType.FileList => "File",
                 ClipContentType.Html => "Html",
                 _ => "Text",
             };

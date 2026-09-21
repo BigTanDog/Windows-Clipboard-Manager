@@ -62,6 +62,27 @@ public partial class PanelWindow : Window
         Deactivated += OnPanelDeactivated;
     }
 
+    /// <summary>
+    /// 搜索框底色的绑定源（由 <see cref="ApplyAcrylic"/> 按当前透明度写入）。
+    /// <para>
+    /// 为什么用依赖属性 + Binding，而不是给它挂 <c>DynamicResource</c>：动态资源表达式在主题切换时
+    /// 会被重新解析，会把按透明度算好的 alpha 覆盖掉；这里让代码独占写入，谁都不会覆盖它。
+    /// </para>
+    /// </summary>
+    public static readonly DependencyProperty SearchBackgroundProperty =
+        DependencyProperty.Register(
+            nameof(SearchBackground),
+            typeof(Brush),
+            typeof(PanelWindow),
+            new PropertyMetadata(Brushes.Transparent));
+
+    /// <summary>搜索框底色（跟随面板透明度，见 <see cref="SearchBackgroundProperty"/>）。</summary>
+    public Brush SearchBackground
+    {
+        get => (Brush)GetValue(SearchBackgroundProperty);
+        private set => SetValue(SearchBackgroundProperty, value);
+    }
+
     /// <summary>是否在失去激活（点击面板外部）时自动隐藏（附加项 B-01，由宿主按设置同步）。</summary>
     public bool HideOnClickOutside { get; set; } = true;
 
@@ -98,9 +119,21 @@ public partial class PanelWindow : Window
         // 标题栏/状态栏比主体略实一点：那里是小字号提示，透明过头会看不清。
         var headerAlpha = (byte)Math.Min(255, alpha + 24);
         var headerBrush = new SolidColorBrush(Color.FromArgb(headerAlpha, headerColor.R, headerColor.G, headerColor.B));
+        headerBrush.Freeze();
         HeaderBar.Background = headerBrush;
         FooterBar.Background = headerBrush;
+
+        // 搜索框跟随同一透明度（用与标题栏同档的 alpha，保证输入时文字仍然清楚）：
+        // 否则它会成为整块面板上唯一不透明的地方，看着很割裂（用户 2026-09-21 反馈）。
+        var controlColor = ReadColor("ControlBackgroundBrush", surfaceColor);
+        var searchBrush = new SolidColorBrush(Color.FromArgb(headerAlpha, controlColor.R, controlColor.G, controlColor.B));
+        searchBrush.Freeze();
+        SearchBackground = searchBrush;
     }
+
+    /// <summary>读取当前主题里的颜色（资源缺失时回退，只影响观感不影响功能）。</summary>
+    private Color ReadColor(string key, Color fallback) =>
+        TryFindResource(key) is SolidColorBrush brush ? brush.Color : fallback;
 
     /// <summary>失去激活：按设置自动隐藏（右键菜单打开期间不隐藏，否则菜单会被连带关掉）。</summary>
     private void OnPanelDeactivated(object? sender, EventArgs e)

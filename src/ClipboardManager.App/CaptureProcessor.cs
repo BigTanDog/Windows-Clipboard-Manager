@@ -86,12 +86,60 @@ internal sealed class CaptureProcessor
         }
 
         var effective = candidate with { FilePaths = paths };
+        var hash = ContentHasher.ForFileList(paths);
+        var (blobPath, sizeBytes) = CreateImageFileBlob(paths, hash, effective.SizeBytes);
+
         return new ProcessedCapture(
             effective,
-            ContentHasher.ForFileList(paths),
+            hash,
             PreviewBuilder.ForFileList(paths),
-            null,
-            effective.SizeBytes);
+            blobPath,
+            sizeBytes);
+    }
+
+    /// <summary>
+    /// 复制的是**单个图片文件**时，生成一张缩略图作为该记录的本体（用户 2026-09-21 需求：
+    /// 列表里能像截图那样直接看到图）。
+    /// <para>
+    /// 两个刻意的取舍：① <b>不缓存原文件内容</b>（"文件内容缓存"是产品计划 §1.2 的永久非目标），
+    /// 只存一张长边不超过 256px 的 PNG；② <b>记录类型仍是"文件"</b>，粘贴行为不变 ——
+    /// 粘出去的仍然是文件本身（若改成图片类型，粘到资源管理器里就会变成图片内容，是错误行为）。
+    /// </para>
+    /// <para>生成失败（格式不支持 / 文件已被移动 / 太大）就当作普通文件记录，不报错、不影响入库。</para>
+    /// </summary>
+    /// <param name="paths">已校验的文件路径列表。</param>
+    /// <param name="hash">记录的内容哈希（仍是文件列表哈希，去重口径不变）。</param>
+    /// <param name="fallbackSize">没有缩略图时的记录体积。</param>
+    private (string? BlobPath, long SizeBytes) CreateImageFileBlob(
+        IReadOnlyList<string> paths,
+        string hash,
+        long fallbackSize)
+    {
+        if (ImageFileExtensions.TryGetSingleImageFile(paths) is not { } filePath)
+        {
+            return (null, fallbackSize);
+        }
+
+        var thumbnail = PngEncoder.TryCreateThumbnailFromFile(filePath);
+        if (thumbnail is null)
+        {
+            _log.Diag("图片文件：缩略图生成失败（格式不支持 / 文件已移动 / 过大），按普通文件显示");
+            return (null, fallbackSize);
+        }
+
+        try
+        {
+            // 本体路径内容寻址（同哈希同扩展名）：本体就是这张缩略图，
+            // 删除、孤儿清理、磁盘占用统计全都沿用现有机制，不需要任何特殊分支。
+            var blobPath = _blobs.Save(thumbnail, hash, "png");
+            return (blobPath, thumbnail.LongLength);
+        }
+        catch (Exception ex)
+        {
+            // 写盘失败绝不能连累记录入库：退化成"没有缩略图的文件记录"。
+            _log.Error("保存图片文件缩略图失败", ex);
+            return (null, fallbackSize);
+        }
     }
 
     private ProcessedCapture? ProcessHtml(ClipCandidate candidate)

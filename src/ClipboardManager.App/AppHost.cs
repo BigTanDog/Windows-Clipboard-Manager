@@ -462,13 +462,30 @@ internal sealed class AppHost : IDisposable
     }
 
     /// <summary>
-    /// 缩略图绝对路径：<b>只有图片记录</b>才有。
-    /// （HTML 记录也有本体文件，但它没有缩略图，若不加类型判断会让界面出现一个空的缩略图框。）
+    /// 缩略图绝对路径。
+    /// <para>
+    /// 图片记录：本体是全尺寸 PNG，缩略图是同目录的 <c>.thumb.png</c> 变体；
+    /// 文件记录：只有「单个图片文件」才有本体，而且<b>本体本身就是那张缩略图</b>
+    /// （原文件内容不入库 —— 见 §1.2 非目标），所以直接用它；
+    /// HTML 记录也有本体，但那是片段文本，不能当图片显示，必须排除。
+    /// </para>
     /// </summary>
-    private string? ThumbnailPath(ClipItem item) =>
-        item.Type != ClipContentType.Image || string.IsNullOrEmpty(item.BlobPath)
-            ? null
-            : Path.Combine(AppPaths.DataDirectory, BlobStore.ThumbnailPathFor(item.BlobPath)!);
+    private string? ThumbnailPath(ClipItem item)
+    {
+        if (string.IsNullOrEmpty(item.BlobPath))
+        {
+            return null;
+        }
+
+        var relative = item.Type switch
+        {
+            ClipContentType.FileList => item.BlobPath,
+            ClipContentType.Image => BlobStore.ThumbnailPathFor(item.BlobPath),
+            _ => null,
+        };
+
+        return string.IsNullOrEmpty(relative) ? null : Path.Combine(AppPaths.DataDirectory, relative);
+    }
 
     private int DisplayLimit() => _settings.MaxItems < 0
         ? MaxDisplayItems
