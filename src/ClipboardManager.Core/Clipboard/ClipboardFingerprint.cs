@@ -60,9 +60,17 @@ public static class ClipboardFingerprint
             return null;
         }
 
-        return HtmlClipboardParser.TryParse(raw, out var parsed, out _) && parsed is not null
+        if (!HtmlClipboardParser.TryParse(raw, out var parsed, out _) || parsed is null)
+        {
+            return null;
+        }
+
+        // 与 CaptureProcessor 的入库口径一致：**没有结构元素的 HTML 片段会被按纯文本入库**
+        // （浏览器复制文字的情形），此时记录的哈希是"派生纯文本的哈希"。
+        // 这里必须走同一条路，否则"剪贴板中"徽标与删除即吊销会在这种记录上失准。
+        return HtmlStructure.HasStructuralElement(parsed.Html) || string.IsNullOrWhiteSpace(parsed.PlainText)
             ? ContentHasher.ForText(parsed.Html)
-            : null;
+            : ContentHasher.ForText(parsed.PlainText);
     }
 
     private static string? ForImage(byte[]? dibBytes)

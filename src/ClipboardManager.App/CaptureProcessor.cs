@@ -155,6 +155,32 @@ internal sealed class CaptureProcessor
             return null;
         }
 
+        // 识别优化（用户 2026-09-22 反馈）：在浏览器里选中一段文字复制时，剪贴板**同时**带
+        // 「HTML Format」与纯文本，而读取优先级是先 HTML —— 于是"复制一句话"被存成 HTML 记录、
+        // 列表里显示「HTML」徽标，可用户明明复制的是文字。
+        // 判定：片段里没有任何结构/语义元素（链接 / 图片 / 列表 / 表格 / 代码 / 换行 / 段落）时，
+        // 它本质上就是"带样式的文字" → 按**纯文本**入库（粘贴出去的也是纯文本，正是用户的预期）。
+        // 纯样式（span / font / b / strong / h1~h6 的颜色字体字号）不算结构，浏览器选区正是这种形态。
+        if (!HtmlStructure.HasStructuralElement(parsed.Html) && !string.IsNullOrWhiteSpace(parsed.PlainText))
+        {
+            var textOnly = candidate with
+            {
+                Type = ClipContentType.Text,
+                Text = parsed.PlainText,
+                Binary = null,
+                BlobExtension = null,
+            };
+
+            _log.Diag("HTML 片段没有结构元素（纯排版样式），按纯文本入库");
+
+            return new ProcessedCapture(
+                textOnly,
+                ContentHasher.ForText(parsed.PlainText),
+                PreviewBuilder.ForText(parsed.PlainText),
+                null,
+                textOnly.SizeBytes);
+        }
+
         // 存 HTML 片段本体（元数据与二进制分离），文本内容用派生纯文本（供搜索与写回降级）。
         var fragmentBytes = System.Text.Encoding.UTF8.GetBytes(parsed.Html);
         var hash = ContentHasher.ForText(parsed.Html);

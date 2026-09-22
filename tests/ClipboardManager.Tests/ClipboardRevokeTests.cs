@@ -109,17 +109,23 @@ public sealed class ClipboardRevokeTests : IDisposable
         Assert.Equal(ProcessHash(candidate), ClipboardFingerprint.Of(candidate));
     }
 
-    [Fact]
-    public void HTML指纹与入库哈希一致()
+    [Theory]
+    // 有结构（链接）→ 存 HTML，哈希按片段算
+    [InlineData("<a href=\"https://example.com\">去看这个</a>")]
+    // 只有排版样式 → 按纯文本入库，哈希按派生纯文本算（浏览器复制文字的情形）
+    [InlineData("<span style=\"font-size: 16px\">今天天气不错</span>")]
+    [InlineData("<b>加粗</b> 正文")]
+    public void HTML指纹与入库哈希一致(string fragment)
     {
         var candidate = new ClipCandidate
         {
             Type = ClipContentType.Html,
-            Binary = HtmlClipboardWriter.Build("<b>加粗</b> 正文"),
+            Binary = HtmlClipboardWriter.Build(fragment),
             BlobExtension = "html",
             CapturedAt = DateTimeOffset.Now,
         };
 
+        // 这条测试是"两处实现不许漂移"的守门人：CaptureProcessor 改了口径，这里必须同步。
         Assert.Equal(ProcessHash(candidate), ClipboardFingerprint.Of(candidate));
     }
 
