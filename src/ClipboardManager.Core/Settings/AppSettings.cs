@@ -131,6 +131,21 @@ public sealed record AppSettings
     public bool ClearClipboardOnDelete { get; init; } = true;
 
     /// <summary>
+    /// 「清空历史」时是否<b>连收藏的记录一起删除</b>。
+    /// <para>
+    /// 默认 <c>false</c>：清空历史只删非收藏记录，收藏的条目会保留下来 —— 收藏是用户明确标记
+    /// "这条不能丢"的内容，默认把它一起删掉太容易造成不可挽回的损失（用户 2026-09-30 反馈）。
+    /// 设为 <c>true</c> 才是彻底清空（与旧版本行为一致）。
+    /// </para>
+    /// <para>
+    /// 注意：本字段默认值是 <c>false</c>，与类型零值一致 —— 因此<b>不需要</b>像
+    /// <see cref="ClearClipboardOnDelete"/> 那样做 schema 迁移：老设置文件里缺这个字段时
+    /// 反序列化得到的 <c>false</c> 正是期望值（判据同 <see cref="ClearSensitiveAfterMinutes"/>）。
+    /// </para>
+    /// </summary>
+    public bool ClearPinnedOnClearHistory { get; init; }
+
+    /// <summary>
     /// 单击条目是否直接粘贴并收起面板。
     /// <para>
     /// 默认 <c>false</c>：<b>单击只选中</b>，粘贴交给双击或 <c>Enter</c> —— 避免"只想选中看看"时
@@ -176,6 +191,7 @@ public sealed record AppSettings
             && AcrylicStrength == other.AcrylicStrength
             && SingleClickPaste == other.SingleClickPaste
             && ClearClipboardOnDelete == other.ClearClipboardOnDelete
+            && ClearPinnedOnClearHistory == other.ClearPinnedOnClearHistory
             && ClearSensitiveAfterMinutes == other.ClearSensitiveAfterMinutes
             && ExcludedApps.SequenceEqual(other.ExcludedApps, StringComparer.OrdinalIgnoreCase);
     }
@@ -199,6 +215,7 @@ public sealed record AppSettings
         hash.Add(AcrylicStrength);
         hash.Add(SingleClickPaste);
         hash.Add(ClearClipboardOnDelete);
+        hash.Add(ClearPinnedOnClearHistory);
         hash.Add(ClearSensitiveAfterMinutes);
         foreach (var app in ExcludedApps)
         {

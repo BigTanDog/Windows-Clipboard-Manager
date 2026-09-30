@@ -88,6 +88,7 @@ public partial class SettingsWindow : Window
         AutoPasteBox.IsChecked = current.AutoPaste;
         MaskBox.IsChecked = current.MaskSensitiveData;
         ClearClipboardOnDeleteBox.IsChecked = current.ClearClipboardOnDelete;
+        ClearPinnedOnClearHistoryBox.IsChecked = current.ClearPinnedOnClearHistory;
         ExcludeByProcessBox.IsChecked = current.ExcludeByProcessName;
         HideOnClickOutsideBox.IsChecked = current.HideOnClickOutside;
         SingleClickPasteBox.IsChecked = current.SingleClickPaste;
@@ -455,6 +456,7 @@ public partial class SettingsWindow : Window
             HideOnClickOutside = HideOnClickOutsideBox.IsChecked == true,
             SingleClickPaste = SingleClickPasteBox.IsChecked == true,
             ClearClipboardOnDelete = ClearClipboardOnDeleteBox.IsChecked == true,
+            ClearPinnedOnClearHistory = ClearPinnedOnClearHistoryBox.IsChecked == true,
             ClearSensitiveAfterMinutes = AppSettings.SensitiveClearMinutesOptions[SensitiveClearBox.SelectedIndex],
             AcrylicStrength = (int)Math.Round(AcrylicSlider.Value),
         }.Normalize();

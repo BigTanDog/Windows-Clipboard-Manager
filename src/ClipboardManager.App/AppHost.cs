@@ -179,11 +179,7 @@ internal sealed class AppHost : IDisposable
 
         _clipboard = new ClipboardAccess(_messageWindow.Handle);
         _paste = new PasteService(_clipboard, _selfWrite, _blobs, _log);
-        _revoker = new ClipboardRevoker(
-            _clipboard,
-            _presence,
-            _log,
-            hash => _repository.FindByHash(hash) is not null);
+        _revoker = new ClipboardRevoker(_clipboard, _presence, _log);
 
         if (!_messageWindow.TryStartClipboardListening(out var listenError))
         {
@@ -544,7 +540,9 @@ internal sealed class AppHost : IDisposable
         }
 
         // 每次弹出都重置搜索（产品计划 Q-2 的既定行为），并展示完整列表。
+        // 选中项也回到第一条：面板刚弹出时用户看的是最新记录（面板存在期间的刷新则保持选中不跳，见 ListSelection）。
         panel.ResetSearch();
+        panel.ResetSelectionToFirst();
         _query = string.Empty;
         RefreshListAsync();
 
@@ -990,27 +988,49 @@ internal sealed class AppHost : IDisposable
     private static string BuildAutoStartCommand(AppSettings settings) =>
         AutoStartCommand.Build(AppPaths.ProcessPath ?? AppPaths.ProgramDirectory, settings.AutoStartDelaySeconds);
 
-    /// <summary>一键清空（需求 §3.3：必须二次确认）。</summary>
+    /// <summary>
+    /// 一键清空（需求 §3.3：必须二次确认）。
+    /// <para>
+    /// 默认<b>保留收藏记录</b>（用户 2026-09-30 反馈：收藏是明确标记"不能丢"的内容，
+    /// 一起删掉对用户不友好）；只有设置里打开「清空历史时同时删除收藏的记录」才彻底清空。
+    /// </para>
+    /// </summary>
     private void ClearHistoryWithConfirm()
     {
-        var count = _repository?.CountAll() ?? 0;
-        if (count == 0)
+        var includePinned = _settings.ClearPinnedOnClearHistory;
+
+        // 删除范围必须在删除之前取：记录一删就再也认不出「当前剪贴板里装的正是它」。
+        var targets = _repository?.LoadClearTargets(includePinned)
+            ?? new PurgeScope(Array.Empty<long>(), Array.Empty<string>());
+
+        if (targets.IsEmpty)
         {
+            var hasRecords = (_repository?.CountAll() ?? 0) > 0;
+            MessageBox.Show(
+                hasRecords
+                    ? "没有可清空的记录：现有记录全部是收藏。\n"
+                        + "如需连收藏一起删除，请到设置里勾选「清空历史时同时删除收藏的记录」。"
+                    : "还没有任何历史记录。",
+                "剪贴板管理器",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
             return;
         }
 
-        // 删除前先判定：剪贴板里装的是不是我们历史里的某条记录 —— 记录一删就再也认不出身份了。
+        var keptPinned = Math.Max(0, (_repository?.CountAll() ?? targets.Count) - targets.Count);
+
+        // 判定剪贴板里装的是不是「即将被删除的那批」之一 —— 保留收藏时，装的是收藏项就绝不动它。
         var revokeClipboard = false;
         var clipboardSequence = 0L;
         if (_settings.ClearClipboardOnDelete && _revoker is not null)
         {
             try
             {
-                revokeClipboard = _revoker.HoldsTrackedRecord(out clipboardSequence);
+                revokeClipboard = _revoker.HoldsRecordToBePurged(targets, out clipboardSequence);
             }
             catch (Exception ex)
             {
-                _log.Error("判定剪贴板是否属于历史失败", ex);
+                _log.Error("判定剪贴板是否属于待删除记录失败", ex);
             }
         }
 
@@ -1019,8 +1039,12 @@ internal sealed class AppHost : IDisposable
             ? "\n若当前系统剪贴板里正是其中一条，剪贴板也会被一并清空。"
             : string.Empty;
 
+        var keptNotice = includePinned
+            ? "收藏的记录也会一并删除。\n"
+            : keptPinned > 0 ? $"收藏的 {keptPinned} 条会保留。\n" : string.Empty;
+
         var answer = MessageBox.Show(
-            $"确定要清空全部 {count} 条历史记录吗？\n收藏的记录也会被删除，且无法恢复。{clipboardNotice}",
+            $"确定要清空 {targets.Count} 条历史记录吗？\n{keptNotice}此操作无法恢复。{clipboardNotice}",
             "剪贴板管理器",
             MessageBoxButton.OKCancel,
             MessageBoxImage.Warning,
@@ -1036,11 +1060,12 @@ internal sealed class AppHost : IDisposable
             await _backgroundGate.WaitAsync().ConfigureAwait(false);
             try
             {
-                var removed = _repository!.DeleteAll();
+                var removed = _repository!.DeleteAll(includePinned);
 
-                // 记录已清空 → 所有本体文件都成了孤儿，直接在启动时的同一套 GC 逻辑里清掉。
-                var orphans = _blobs!.CollectOrphans([]);
-                _log.Info($"已清空历史：{removed} 条，清理本体文件 {orphans} 个");
+                // 本体文件清理：交给启动时的同一套 GC 逻辑，引用集合 = 删除后仍存在的记录
+                // —— 保留收藏时，收藏记录的本体仍在引用中，因此不会被误删。
+                var orphans = _blobs!.CollectOrphans(_repository.GetReferencedBlobPaths());
+                _log.Info($"已清空历史：{removed} 条（保留收藏={!includePinned}），清理本体文件 {orphans} 个");
 
                 UpdateQuotaWarning(null);
                 var items = QueryItems();

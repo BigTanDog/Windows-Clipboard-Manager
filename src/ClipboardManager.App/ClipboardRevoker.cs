@@ -43,23 +43,19 @@ internal sealed class ClipboardRevoker
     private readonly ClipboardAccess _clipboard;
     private readonly ClipboardPresenceTracker _presence;
     private readonly AppLog _log;
-    private readonly Func<string, bool> _isKnownHash;
 
     /// <summary>创建吊销器。</summary>
     /// <param name="clipboard">剪贴板访问器（STA）。</param>
     /// <param name="presence">剪贴板身份记账本。</param>
     /// <param name="log">日志器。</param>
-    /// <param name="isKnownHash">按内容哈希查历史是否仍有该记录（供「清空历史」前的判定使用）。</param>
     public ClipboardRevoker(
         ClipboardAccess clipboard,
         ClipboardPresenceTracker presence,
-        AppLog log,
-        Func<string, bool> isKnownHash)
+        AppLog log)
     {
         _clipboard = clipboard;
         _presence = presence;
         _log = log;
-        _isKnownHash = isKnownHash;
     }
 
     /// <summary>
@@ -111,16 +107,24 @@ internal sealed class ClipboardRevoker
     }
 
     /// <summary>
-    /// 「清空历史」删除<b>之前</b>的判定：当前剪贴板里装的是不是我们历史里的某条记录
+    /// 「清空历史」删除<b>之前</b>的判定：当前剪贴板里装的，是不是<b>即将被删除的那批记录</b>之一
     /// （记录一删就再也认不出身份了，所以必须先问）。
+    /// <para>
+    /// 为什么必须限定"即将被删除"：清空历史默认保留收藏，剪贴板里可能正是那条会被保留下来的
+    /// 收藏记录 —— 它并没有消失，此时清空剪贴板就是错的。
+    /// </para>
     /// </summary>
+    /// <param name="scope">本次清空将删除的记录范围（主键 + 内容哈希）。</param>
     /// <param name="sequence">判定时该内容对应的序列号，供随后按条件清空使用。</param>
-    public bool HoldsTrackedRecord(out long sequence)
+    public bool HoldsRecordToBePurged(PurgeScope scope, out long sequence)
     {
+        ArgumentNullException.ThrowIfNull(scope);
         sequence = 0;
 
         var live = ClipboardAccess.GetSequenceNumber();
-        if (_presence.HoldsTrackedItem(live))
+        if (_presence.ItemId is { } trackedId
+            && _presence.HoldsTrackedItem(live)
+            && scope.ContainsId(trackedId))
         {
             sequence = live;
             return true;
@@ -131,8 +135,7 @@ internal sealed class ClipboardRevoker
             return false;
         }
 
-        var fingerprint = ClipboardFingerprint.Of(payload);
-        if (fingerprint is null || !_isKnownHash(fingerprint))
+        if (!scope.ContainsHash(ClipboardFingerprint.Of(payload)))
         {
             return false;
         }

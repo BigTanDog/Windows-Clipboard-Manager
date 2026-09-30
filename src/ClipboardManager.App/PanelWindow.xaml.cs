@@ -31,6 +31,15 @@ public partial class PanelWindow : Window
     private bool _contextMenuOpen;
     private bool _singleClickPaste;
 
+    /// <summary>
+    /// 下次刷新列表时是否把选中项重置为第一条（面板每次弹出时由宿主置位）。
+    /// <para>
+    /// 面板存在期间的刷新必须<b>保持</b>选中：否则删掉一条后选中会跳回顶部，
+    /// 连按 Delete 时极易误删到别的内容（用户 2026-09-30 反馈）。
+    /// </para>
+    /// </summary>
+    private bool _resetSelectionOnNextRefresh = true;
+
     /// <summary>创建面板。</summary>
     public PanelWindow()
     {
@@ -177,6 +186,13 @@ public partial class PanelWindow : Window
     {
         ArgumentNullException.ThrowIfNull(items);
 
+        // 刷新前记住选中状态：选中项若已被删除，就落到它原来的位置（顶上来的下一条），
+        // 而不是跳回第一条。规则见 Core/Ui/ListSelection。
+        var previousId = (ItemsList.SelectedItem as ClipItemViewModel)?.Source.Id;
+        var previousIndex = ItemsList.SelectedIndex;
+        var keepSelection = !_resetSelectionOnNextRefresh;
+        _resetSelectionOnNextRefresh = false;
+
         _items.Clear();
         foreach (var item in items)
         {
@@ -191,13 +207,26 @@ public partial class PanelWindow : Window
                 ? DefaultEmptyHint
                 : "没有匹配的记录";
             EmptyHint.Visibility = Visibility.Visible;
+            return;
         }
-        else
+
+        EmptyHint.Visibility = Visibility.Collapsed;
+
+        var index = ListSelection.Resolve(
+            [.. items.Select(static item => item.Source.Id)],
+            previousId,
+            previousIndex,
+            keepSelection);
+
+        if (index != ListSelection.None)
         {
-            EmptyHint.Visibility = Visibility.Collapsed;
-            ItemsList.SelectedIndex = 0;
+            ItemsList.SelectedIndex = index;
+            ItemsList.ScrollIntoView(ItemsList.SelectedItem);
         }
     }
+
+    /// <summary>下次刷新列表时把选中项重置为第一条（面板每次弹出时由宿主调用）。</summary>
+    public void ResetSelectionToFirst() => _resetSelectionOnNextRefresh = true;
 
     /// <summary>
     /// 设置磁盘上限提示（D-09：只剩收藏仍超限时提示用户，不自动删除）。传 null 或空串即隐藏。

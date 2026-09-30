@@ -1,3 +1,4 @@
+using ClipboardManager.Core.Clipboard;
 using ClipboardManager.Core.Models;
 using ClipboardManager.Core.Retention;
 using Microsoft.Data.Sqlite;
@@ -199,26 +200,71 @@ public sealed class SqliteHistoryRepository : IDisposable
     }
 
     /// <summary>删除全部记录（需求 §3.3 一键清空）。</summary>
-    public int DeleteAll()
+    public int DeleteAll() => DeleteAll(includePinned: true);
+
+    /// <summary>删除记录（「清空历史」）。</summary>
+    /// <param name="includePinned">
+    /// false 时<b>保留收藏记录</b> —— 这是「清空历史」的默认交互（收藏是用户明确标记"不能丢"的内容）。
+    /// </param>
+    public int DeleteAll(bool includePinned)
     {
         lock (_gate)
         {
             var connection = EnsureConnection();
             using var command = connection.CreateCommand();
-            command.CommandText = "DELETE FROM clip_items;";
+            command.CommandText = includePinned
+                ? "DELETE FROM clip_items;"
+                : "DELETE FROM clip_items WHERE is_pinned = 0;";
             return command.ExecuteNonQuery();
         }
     }
 
     /// <summary>记录总数。</summary>
-    public int CountAll()
+    public int CountAll() => CountAll(includePinned: true);
+
+    /// <summary>记录总数。</summary>
+    /// <param name="includePinned">false 时只统计非收藏记录（「清空历史」保留收藏时用于算条数）。</param>
+    public int CountAll(bool includePinned)
     {
         lock (_gate)
         {
             var connection = EnsureConnection();
             using var command = connection.CreateCommand();
-            command.CommandText = "SELECT COUNT(1) FROM clip_items;";
+            command.CommandText = includePinned
+                ? "SELECT COUNT(1) FROM clip_items;"
+                : "SELECT COUNT(1) FROM clip_items WHERE is_pinned = 0;";
             return Convert.ToInt32(command.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture);
+        }
+    }
+
+    /// <summary>
+    /// 取「清空历史」将被删除的记录身份（主键 + 内容哈希）。
+    /// <para>
+    /// 必须在删除<b>之前</b>调用：记录一删就再也认不出「当前剪贴板里装的正是它」，
+    /// 也就无法在清空后按条件一并吊销剪贴板（删除即吊销）。
+    /// </para>
+    /// </summary>
+    /// <param name="includePinned">false 时只含非收藏记录（保留收藏的清空）。</param>
+    public PurgeScope LoadClearTargets(bool includePinned)
+    {
+        lock (_gate)
+        {
+            var connection = EnsureConnection();
+            using var command = connection.CreateCommand();
+            command.CommandText = includePinned
+                ? "SELECT id, content_hash FROM clip_items;"
+                : "SELECT id, content_hash FROM clip_items WHERE is_pinned = 0;";
+
+            var ids = new List<long>();
+            var hashes = new List<string>();
+            using var reader = command.ExecuteReader();
+            while (reader.Read())
+            {
+                ids.Add(reader.GetInt64(0));
+                hashes.Add(reader.GetString(1));
+            }
+
+            return new PurgeScope(ids, hashes);
         }
     }
 

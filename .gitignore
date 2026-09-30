@@ -4,6 +4,10 @@ obj/
 artifacts/
 publish/
 
+# 测试覆盖率产物（临时报告，不入库）
+.coverage/
+TestResults/
+
 # IDE
 .vs/
 *.user

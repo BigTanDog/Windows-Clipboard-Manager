@@ -134,11 +134,19 @@
                 <CheckBox x:Name="ClearClipboardOnDeleteBox"
                           Margin="0,0,0,4"
                           Content="删除记录时，如果它正是当前剪贴板内容，同时清空剪贴板" />
-                <TextBlock Margin="24,0,0,10"
+                <TextBlock Margin="24,0,0,8"
                            TextWrapping="Wrap"
                            FontSize="12"
                            Foreground="{DynamicResource MutedTextBrush}"
                            Text="默认开启：删掉之后桌面右键的「粘贴」会立刻变灰，不会再粘出已删除的内容（面板上带「剪贴板中」徽标的就是这一条）。只清系统当前剪贴板；Win+V 历史里的副本和已经粘贴出去的内容不受影响。" />
+                <CheckBox x:Name="ClearPinnedOnClearHistoryBox"
+                          Margin="0,0,0,4"
+                          Content="清空历史时同时删除收藏的记录" />
+                <TextBlock Margin="24,0,0,10"
+                           TextWrapping="Wrap"
+                           FontSize="12"
+                           Foreground="{DynamicResource MutedTextBrush}"
+                           Text="默认关闭：清空历史只删非收藏的记录，收藏的条目会保留（收藏本就是「这条不能丢」的标记）。勾选后才是彻底清空。" />
                 <Grid Margin="0,0,0,8">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="150" />
