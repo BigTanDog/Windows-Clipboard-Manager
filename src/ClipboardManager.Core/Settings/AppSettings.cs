@@ -15,6 +15,9 @@ public sealed record AppSettings
     /// 版本 2（2026-09-19）：新增 <see cref="ClearClipboardOnDelete"/>。
     /// </para>
     /// <para>
+    /// 版本 3（2026-10-05）：新增 <see cref="ConfirmDeletePinned"/>（删除收藏条目前的二次确认，默认开启）。
+    /// </para>
+    /// <para>
     /// <b>为什么新增"默认开启"的开关必须升版本号</b>：本项目的设置用源生成 JSON 反序列化，
     /// 文件里<b>缺字段</b>时得到的是该类型的零值（<c>bool</c> → <c>false</c>），
     /// <b>不是</b>属性声明上的初始值。实测（<c>ClipboardRevokeTests.旧设置文件缺少新字段时取默认值</c>）确认：
@@ -23,10 +26,13 @@ public sealed record AppSettings
     /// <see cref="Normalize"/> 里按旧版本号补上默认值。
     /// </para>
     /// </summary>
-    public const int CurrentSchemaVersion = 2;
+    public const int CurrentSchemaVersion = 3;
 
     /// <summary>引入 <see cref="ClearClipboardOnDelete"/> 之前的设置文件版本（低于此版本视为"没这个字段"）。</summary>
     private const int SchemaVersionBeforeClearClipboardOnDelete = 2;
+
+    /// <summary>引入 <see cref="ConfirmDeletePinned"/> 之前的设置文件版本（低于此版本视为"没这个字段"）。</summary>
+    private const int SchemaVersionBeforeConfirmDeletePinned = 3;
 
     /// <summary>记录条数上限的可选档位（-1 表示不限制）。</summary>
     public static readonly int[] MaxItemsOptions = [50, 100, 200, 500, -1];
@@ -146,6 +152,19 @@ public sealed record AppSettings
     public bool ClearPinnedOnClearHistory { get; init; }
 
     /// <summary>
+    /// 删除<b>已收藏</b>的条目之前先弹一个二次确认（默认开启；用户 2026-10-05 要求）。
+    /// <para>
+    /// 收藏是用户明确标记"不能丢"的内容，误删代价高；删除普通记录不会多问一句（不打扰日常操作）。
+    /// </para>
+    /// <para>
+    /// 注意：默认值是 <c>true</c>，<b>不等于</b>类型零值 —— 因此必须把
+    /// <see cref="CurrentSchemaVersion"/> 升到 3 并在 <see cref="Normalize"/> 里按旧版本号补默认值，
+    /// 否则老设置文件升级后这个开关会静默失效（类型顶部有完整说明）。
+    /// </para>
+    /// </summary>
+    public bool ConfirmDeletePinned { get; init; } = true;
+
+    /// <summary>
     /// 单击条目是否直接粘贴并收起面板。
     /// <para>
     /// 默认 <c>false</c>：<b>单击只选中</b>，粘贴交给双击或 <c>Enter</c> —— 避免"只想选中看看"时
@@ -192,6 +211,7 @@ public sealed record AppSettings
             && SingleClickPaste == other.SingleClickPaste
             && ClearClipboardOnDelete == other.ClearClipboardOnDelete
             && ClearPinnedOnClearHistory == other.ClearPinnedOnClearHistory
+            && ConfirmDeletePinned == other.ConfirmDeletePinned
             && ClearSensitiveAfterMinutes == other.ClearSensitiveAfterMinutes
             && ExcludedApps.SequenceEqual(other.ExcludedApps, StringComparer.OrdinalIgnoreCase);
     }
@@ -216,6 +236,7 @@ public sealed record AppSettings
         hash.Add(SingleClickPaste);
         hash.Add(ClearClipboardOnDelete);
         hash.Add(ClearPinnedOnClearHistory);
+        hash.Add(ConfirmDeletePinned);
         hash.Add(ClearSensitiveAfterMinutes);
         foreach (var app in ExcludedApps)
         {
@@ -251,6 +272,12 @@ public sealed record AppSettings
             ClearClipboardOnDelete = SchemaVersion < SchemaVersionBeforeClearClipboardOnDelete
                 ? true
                 : ClearClipboardOnDelete,
+
+            // 迁移：v3 之前的设置文件里没有 confirmDeletePinned 字段（同样只会给出 false）——
+            // 按「设计默认值（开启）」补上，否则老用户升级后"删收藏先确认"会静默失效。
+            ConfirmDeletePinned = SchemaVersion < SchemaVersionBeforeConfirmDeletePinned
+                ? true
+                : ConfirmDeletePinned,
 
             // B-09 的档位默认 0（关闭），与类型零值一致 → 老文件缺字段时读到的 0 就是期望值，
             // 不需要迁移（这条注释是刻意留的：下次新增「默认关闭」的字段可以照此判断）。

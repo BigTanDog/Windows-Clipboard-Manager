@@ -112,12 +112,68 @@
         </Setter>
     </Style>
 
-    <!-- ─────────── 图标几何（矢量线条图标，不依赖字体与 emoji） ─────────── -->
-    <Geometry x:Key="IconGear">
-        M7,4.5 A2.5,2.5 0 1 1 6.99,4.5 Z
-        M7,0.9 V2.7 M7,11.3 V13.1 M0.9,7 H2.7 M11.3,7 H13.1
-        M2.7,2.7 L4,4 M10,10 L11.3,11.3 M11.3,2.7 L10,4 M4,10 L2.7,11.3
-    </Geometry>
+    <!-- 底部栏图标按钮：比 FlatIconButtonStyle 更醒目（默认主文字色，悬停转强调色）。
+         仅供面板右下角的「设置」齿轮使用。 -->
+    <Style x:Key="FooterIconButtonStyle" TargetType="Button">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" />
+        <Setter Property="Width" Value="30" />
+        <Setter Property="Height" Value="26" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="6">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource HoverBrush}" />
+                            <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource SelectionBrush}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- 底部栏开关型图标按钮（「只看收藏」）：选中时点亮成收藏金色 + 底色高亮，
+         让「现在只看收藏」一眼可见。 -->
+    <Style x:Key="FooterToggleIconStyle" TargetType="ToggleButton">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}" />
+        <Setter Property="Width" Value="30" />
+        <Setter Property="Height" Value="26" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ToggleButton">
+                    <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="6">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource HoverBrush}" />
+                            <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter Property="Foreground" Value="{DynamicResource PinnedBrush}" />
+                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource SelectionBrush}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- ─────────── 图标几何（矢量线条图标，不依赖字体与 emoji） ───────────
+         齿轮/星形这两个底部栏图标是 Fill 填充的官方图标，几何定义在
+         App/Imaging/IconGeometry.cs（便于用单元测试校验 path 可解析）。 -->
     <Geometry x:Key="KindIconText">M1,2 H13 M7,2 V13</Geometry>
     <Geometry x:Key="KindIconImage">
         M1.5,2.5 H12.5 V11.5 H1.5 Z

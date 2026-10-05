@@ -159,19 +159,29 @@ public sealed class SqliteHistoryRepository : IDisposable
 
     /// <summary>按最近更新时间取记录（列表用）。</summary>
     /// <param name="limit">最多返回条数。</param>
-    public IReadOnlyList<ClipItem> GetRecent(int limit)
+    /// <param name="pinnedOnly">true 时只返回收藏记录（面板的「只看收藏」筛选）。</param>
+    public IReadOnlyList<ClipItem> GetRecent(int limit, bool pinnedOnly = false)
     {
         lock (_gate)
         {
             var connection = EnsureConnection();
             using var command = connection.CreateCommand();
-            command.CommandText = """
-                SELECT id, type, text_content, blob_path, file_paths, preview, content_hash,
-                       size_bytes, is_pinned, source_app, created_at, updated_at
-                FROM clip_items
-                ORDER BY updated_at DESC, id DESC
-                LIMIT $limit;
-                """;
+            command.CommandText = pinnedOnly
+                ? """
+                    SELECT id, type, text_content, blob_path, file_paths, preview, content_hash,
+                           size_bytes, is_pinned, source_app, created_at, updated_at
+                    FROM clip_items
+                    WHERE is_pinned = 1
+                    ORDER BY updated_at DESC, id DESC
+                    LIMIT $limit;
+                    """
+                : """
+                    SELECT id, type, text_content, blob_path, file_paths, preview, content_hash,
+                           size_bytes, is_pinned, source_app, created_at, updated_at
+                    FROM clip_items
+                    ORDER BY updated_at DESC, id DESC
+                    LIMIT $limit;
+                    """;
             command.Parameters.AddWithValue("$limit", Math.Max(limit, 0));
 
             var items = new List<ClipItem>();
@@ -426,27 +436,42 @@ public sealed class SqliteHistoryRepository : IDisposable
     /// </summary>
     /// <param name="query">查询词；空查询退化为「最近记录」。</param>
     /// <param name="limit">最多返回条数。</param>
-    public IReadOnlyList<ClipItem> Search(string? query, int limit)
+    /// <param name="pinnedOnly">true 时只搜收藏记录（可与面板的「只看收藏」叠加）。</param>
+    public IReadOnlyList<ClipItem> Search(string? query, int limit, bool pinnedOnly = false)
     {
         if (string.IsNullOrWhiteSpace(query))
         {
-            return GetRecent(limit);
+            return GetRecent(limit, pinnedOnly);
         }
 
         lock (_gate)
         {
             var connection = EnsureConnection();
             using var command = connection.CreateCommand();
-            command.CommandText = """
-                SELECT id, type, text_content, blob_path, file_paths, preview, content_hash,
-                       size_bytes, is_pinned, source_app, created_at, updated_at
-                FROM clip_items
-                WHERE text_content LIKE $pattern ESCAPE '\'
-                   OR file_paths   LIKE $pattern ESCAPE '\'
-                   OR preview      LIKE $pattern ESCAPE '\'
-                ORDER BY updated_at DESC, id DESC
-                LIMIT $limit;
-                """;
+            // 匹配条件必须整体括起来：否则 `A OR B OR C AND is_pinned = 1` 会因为 AND 优先级更高
+            // 而变成「A 或 B 或 (C 且收藏)」，把非收藏记录也搜出来。
+            command.CommandText = pinnedOnly
+                ? """
+                    SELECT id, type, text_content, blob_path, file_paths, preview, content_hash,
+                           size_bytes, is_pinned, source_app, created_at, updated_at
+                    FROM clip_items
+                    WHERE (text_content LIKE $pattern ESCAPE '\'
+                       OR file_paths   LIKE $pattern ESCAPE '\'
+                       OR preview      LIKE $pattern ESCAPE '\')
+                      AND is_pinned = 1
+                    ORDER BY updated_at DESC, id DESC
+                    LIMIT $limit;
+                    """
+                : """
+                    SELECT id, type, text_content, blob_path, file_paths, preview, content_hash,
+                           size_bytes, is_pinned, source_app, created_at, updated_at
+                    FROM clip_items
+                    WHERE text_content LIKE $pattern ESCAPE '\'
+                       OR file_paths   LIKE $pattern ESCAPE '\'
+                       OR preview      LIKE $pattern ESCAPE '\'
+                    ORDER BY updated_at DESC, id DESC
+                    LIMIT $limit;
+                    """;
             command.Parameters.AddWithValue("$pattern", "%" + EscapeLike(query.Trim()) + "%");
             command.Parameters.AddWithValue("$limit", Math.Max(limit, 0));
 

@@ -72,6 +72,9 @@ internal sealed class AppHost : IDisposable
     private IntPtr _previousForeground;
     private long _lastProcessedSequence = -1;
     private string _query = string.Empty;
+
+    /// <summary>是否只看收藏（面板底部星形按钮，用户 2026-10-05 要求）。面板每次弹出重置为 false。</summary>
+    private bool _pinnedOnly;
     private string? _quotaWarning;
 
     /// <summary>设置窗口拖动亚克力滑杆时的临时预览值（未保存；null 表示用设置里的值）。</summary>
@@ -428,8 +431,8 @@ internal sealed class AppHost : IDisposable
     {
         var limit = DisplayLimit();
         return string.IsNullOrEmpty(_query)
-            ? _repository!.GetRecent(limit)
-            : _repository!.Search(_query, limit);
+            ? _repository!.GetRecent(limit, _pinnedOnly)
+            : _repository!.Search(_query, limit, _pinnedOnly);
     }
 
     private void ApplyItems(IReadOnlyList<ClipItem> items)
@@ -514,6 +517,7 @@ internal sealed class AppHost : IDisposable
         panel.SearchRequested += OnSearchRequested;
         panel.PinToggleRequested += OnPinToggleRequested;
         panel.SettingsRequested += OnSettingsRequestedFromPanel;
+        panel.PinnedFilterChanged += OnPinnedFilterChanged;
         panel.SetQuotaHint(_quotaWarning);
         panel.Icon = Imaging.AppIcon.TryLoadImageSource();
         panel.HideOnClickOutside = _settings.HideOnClickOutside;
@@ -543,7 +547,9 @@ internal sealed class AppHost : IDisposable
         // 选中项也回到第一条：面板刚弹出时用户看的是最新记录（面板存在期间的刷新则保持选中不跳，见 ListSelection）。
         panel.ResetSearch();
         panel.ResetSelectionToFirst();
+        panel.ResetPinnedFilter();
         _query = string.Empty;
+        _pinnedOnly = false;
         RefreshListAsync();
 
         var watch = Stopwatch.StartNew();
@@ -626,6 +632,14 @@ internal sealed class AppHost : IDisposable
     {
         _query = query;
         _log.Diag($"搜索：{(string.IsNullOrEmpty(query) ? "清空" : "执行")}");
+        RefreshListAsync();
+    }
+
+    /// <summary>面板底部星形按钮：切换「只看收藏」（过滤在数据库层做，见 <see cref="QueryItems"/>）。</summary>
+    private void OnPinnedFilterChanged(bool pinnedOnly)
+    {
+        _pinnedOnly = pinnedOnly;
+        _log.Diag($"筛选：只看收藏={pinnedOnly}");
         RefreshListAsync();
     }
 
@@ -791,8 +805,77 @@ internal sealed class AppHost : IDisposable
         });
     }
 
+    /// <summary>
+    /// 删除<b>收藏</b>条目前的二次确认（B-14，默认开启；用户 2026-10-05 要求）。
+    /// <para>
+    /// 两个必须守住的点：① 面板是 TopMost，确认框必须挂 <b>owner = 面板</b>，否则会被面板盖住；
+    /// ② 弹框会让面板失去激活 —— 若此时开着「点击外部自动隐藏」，面板会先把自己收起来，
+    /// 连带把它拥有的对话框一起隐藏（用户会以为点了没反应）→ 弹框期间临时摘掉这个行为，弹完恢复。
+    /// </para>
+    /// </summary>
+    /// <param name="item">待删除的记录。</param>
+    /// <returns>true 表示可以继续删除。</returns>
+    private bool ConfirmDeletingPinned(ClipItem item)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        if (!item.IsPinned || !_settings.ConfirmDeletePinned)
+        {
+            return true;
+        }
+
+        var panel = _panel;
+        var hideOnClickOutside = panel?.HideOnClickOutside ?? false;
+        var preview = PreviewForConfirm(item);
+        const string title = "剪贴板管理器";
+        var message = $"这一条已收藏：{preview}\n确定要删除吗？";
+
+        try
+        {
+            if (panel is not null)
+            {
+                panel.HideOnClickOutside = false;
+            }
+
+            var answer = panel is null
+                ? MessageBox.Show(
+                    message,
+                    title,
+                    MessageBoxButton.OKCancel,
+                    MessageBoxImage.Warning,
+                    MessageBoxResult.Cancel)
+                : MessageBox.Show(
+                    panel,
+                    message,
+                    title,
+                    MessageBoxButton.OKCancel,
+                    MessageBoxImage.Warning,
+                    MessageBoxResult.Cancel);
+
+            return answer == MessageBoxResult.OK;
+        }
+        finally
+        {
+            if (panel is not null)
+            {
+                panel.HideOnClickOutside = hideOnClickOutside;
+            }
+        }
+    }
+
+    /// <summary>确认框里的单行摘要：先脱敏、再折叠换行、最后截断（剪贴板内容不可信，别撑爆对话框）。</summary>
+    private string PreviewForConfirm(ClipItem item)
+    {
+        var preview = _masker.Mask(item.Preview).ReplaceLineEndings(" ").Trim();
+        return preview.Length <= 40 ? preview : string.Concat(preview.AsSpan(0, 40), "…");
+    }
+
     private void OnDeleteRequested(ClipItem item)
     {
+        if (!ConfirmDeletingPinned(item))
+        {
+            return;
+        }
+
         _ = Task.Run(async () =>
         {
             await _backgroundGate.WaitAsync().ConfigureAwait(false);

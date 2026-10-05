@@ -177,6 +177,9 @@ public partial class PanelWindow : Window
     /// <summary>请求打开设置窗口（底部齿轮按钮）。</summary>
     public event Action? SettingsRequested;
 
+    /// <summary>「只看收藏」开关变化（底部星形按钮）。参数 true = 只显示收藏的条目。</summary>
+    public event Action<bool>? PinnedFilterChanged;
+
     /// <summary>当前搜索词（已去除首尾空白）。</summary>
     public string CurrentQuery => SearchBox.Text.Trim();
 
@@ -227,6 +230,13 @@ public partial class PanelWindow : Window
 
     /// <summary>下次刷新列表时把选中项重置为第一条（面板每次弹出时由宿主调用）。</summary>
     public void ResetSelectionToFirst() => _resetSelectionOnNextRefresh = true;
+
+    /// <summary>把「只看收藏」按钮复位（面板每次弹出时由宿主调用；筛选状态由宿主自己清）。</summary>
+    public void ResetPinnedFilter() => PinnedFilterButton.IsChecked = false;
+
+    /// <summary>底部星形按钮：切换「只看收藏」（真正的过滤在宿主侧走数据库查询）。</summary>
+    private void OnPinnedFilterClick(object sender, RoutedEventArgs e) =>
+        PinnedFilterChanged?.Invoke(PinnedFilterButton.IsChecked == true);
 
     /// <summary>
     /// 设置磁盘上限提示（D-09：只剩收藏仍超限时提示用户，不自动删除）。传 null 或空串即隐藏。
@@ -475,8 +485,10 @@ public partial class PanelWindow : Window
             return;
         }
 
+        // 底部右侧现在有「只看收藏」和「设置」两个按钮，文案改用缩写给它俩腾地方
+        // （用户 2026-10-05 建议：位置不够就用缩写）；完整说明挂在 ToolTip 上。
         HintText.Text = _singleClickPaste
-            ? "单击 / Enter 粘贴 · ↑↓ 选择 · Delete 删除 · 右键收藏 · Esc 关闭"
-            : "单击选中 · 双击 / Enter 粘贴 · ↑↓ 选择 · Delete 删除 · Esc 关闭";
+            ? "单击粘贴 · Del 删 · 右键收藏"
+            : "单击选中 · 双击粘贴 · Del 删 · 右键收藏";
     }
 }
