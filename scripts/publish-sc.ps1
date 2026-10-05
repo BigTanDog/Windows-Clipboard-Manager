@@ -17,4 +17,7 @@ Get-ChildItem -LiteralPath $output -File | Sort-Object Length -Descending |
     Format-Table -AutoSize
 
 # 同步到 release/（文件名带版本号，见 _release.ps1）
-Copy-ToRelease -ExePath (Join-Path $output 'ClipboardManager.exe') -BaseName 'ClipboardManager_完整版_免装运行时'
+# 形态 A 只进 release/、不推本机日常副本（-SkipLocalDeploy）：它 64MB，日常用形态 B 更轻。
+Copy-ToRelease -ExePath (Join-Path $output 'ClipboardManager.exe') `
+    -BaseName 'ClipboardManager_完整版_免装运行时' `
+    -SkipLocalDeploy
