@@ -238,6 +238,58 @@ public sealed class ClipboardAccess
     /// <summary>
     /// 写回剪贴板（可同时写多种格式，D-08 要求 HTML 记录附带纯文本降级）。
     /// </summary>
+    /// <summary>
+    /// 无条件清空系统剪贴板（用户显式操作：面板底部的「清空系统剪贴板」按钮，2026-10-06 需求）。
+    /// <para>
+    /// 与 <see cref="TryClearIfSequence"/> 的区别：这里<b>不做序列号复核</b> —— 调用方就是用户本人，
+    /// 他要的就是"现在把剪贴板清掉"，不存在"可能误清别人的新内容"这回事。
+    /// 仍保留"打不开就放弃"的兜底（剪贴板被别的程序占用时如实报错，绝不假装成功）。
+    /// </para>
+    /// <para><b>不触碰任何历史记录</b>：删不删记录由调用方决定，本方法只管系统剪贴板。</para>
+    /// </summary>
+    /// <param name="error">失败原因（被占用 / Win32 错误码）。</param>
+    public bool TryClear(out string? error)
+    {
+        error = null;
+
+        for (var attempt = 1; attempt <= MaxAttempts; attempt++)
+        {
+            if (!NativeMethods.OpenClipboard(_ownerWindow))
+            {
+                var code = Marshal.GetLastWin32Error();
+                if (code == NativeMethods.ERROR_ACCESS_DENIED && attempt < MaxAttempts)
+                {
+                    Thread.Sleep(RetryDelayMs);
+                    continue;
+                }
+
+                error = $"打开剪贴板失败，Win32 错误码 {code}";
+                return false;
+            }
+
+            try
+            {
+                if (!NativeMethods.EmptyClipboard())
+                {
+                    error = $"清空剪贴板失败，Win32 错误码 {Marshal.GetLastWin32Error()}";
+                    return false;
+                }
+
+                return true;
+            }
+            finally
+            {
+                NativeMethods.CloseClipboard();
+            }
+        }
+
+        error = "清空剪贴板失败";
+        return false;
+    }
+
+    /// <summary>
+    /// 把剪贴板内容写回（各类格式见 <see cref="ClipboardWriteRequest"/>）。
+    /// </summary>
     /// <param name="request">写入请求。</param>
     /// <param name="sequenceAfterWrite">写入后的剪贴板序列号，供自循环过滤使用。</param>
     /// <param name="error">失败原因。</param>
@@ -302,28 +354,29 @@ public sealed class ClipboardAccess
             }
 
             var transferred = new List<IntPtr>(blocks.Count);
+            var written = false;
             try
             {
                 if (!NativeMethods.EmptyClipboard())
                 {
                     error = $"清空剪贴板失败，Win32 错误码 {Marshal.GetLastWin32Error()}";
-                    return false;
                 }
-
-                foreach (var (format, handle) in blocks)
+                else
                 {
-                    if (NativeMethods.SetClipboardData(format, handle) == IntPtr.Zero)
+                    written = true;
+                    foreach (var (format, handle) in blocks)
                     {
-                        error = $"写入剪贴板失败（格式 {format}），Win32 错误码 {Marshal.GetLastWin32Error()}";
-                        return false;
+                        if (NativeMethods.SetClipboardData(format, handle) == IntPtr.Zero)
+                        {
+                            error = $"写入剪贴板失败（格式 {format}），Win32 错误码 {Marshal.GetLastWin32Error()}";
+                            written = false;
+                            break;
+                        }
+
+                        // 成功：内存所有权移交系统，之后绝不能再释放。
+                        transferred.Add(handle);
                     }
-
-                    // 成功：内存所有权移交系统，之后绝不能再释放。
-                    transferred.Add(handle);
                 }
-
-                sequenceAfterWrite = NativeMethods.GetClipboardSequenceNumber();
-                return true;
             }
             finally
             {
@@ -337,10 +390,20 @@ public sealed class ClipboardAccess
 
                 NativeMethods.CloseClipboard();
             }
+
+            if (written)
+            {
+                // ⚠️ 序列号必须在 CloseClipboard() **之后**取：EmptyClipboard 与每次 SetClipboardData
+                // 都会让它递增，在锁内读到的是中间值 —— 与随后 WM_CLIPBOARDUPDATE 到达时的实时序列号
+                // 差 1，结果「剪贴板中」徽标判不出来、自循环过滤也只能退化成哈希兜底
+                // （用户 2026-10-06 反馈的徽标丢失即此原因，实测日志见产品计划 B-16）。
+                sequenceAfterWrite = NativeMethods.GetClipboardSequenceNumber();
+                return true;
+            }
         }
 
         FreeAll(blocks);
-        error = "写入剪贴板失败";
+        error ??= "写入剪贴板失败";
         return false;
     }
 

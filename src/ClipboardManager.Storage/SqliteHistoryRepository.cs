@@ -179,7 +179,7 @@ public sealed class SqliteHistoryRepository : IDisposable
                     SELECT id, type, text_content, blob_path, file_paths, preview, content_hash,
                            size_bytes, is_pinned, source_app, created_at, updated_at
                     FROM clip_items
-                    ORDER BY updated_at DESC, id DESC
+                    ORDER BY is_pinned DESC, updated_at DESC, id DESC
                     LIMIT $limit;
                     """;
             command.Parameters.AddWithValue("$limit", Math.Max(limit, 0));
@@ -469,7 +469,7 @@ public sealed class SqliteHistoryRepository : IDisposable
                     WHERE text_content LIKE $pattern ESCAPE '\'
                        OR file_paths   LIKE $pattern ESCAPE '\'
                        OR preview      LIKE $pattern ESCAPE '\'
-                    ORDER BY updated_at DESC, id DESC
+                    ORDER BY is_pinned DESC, updated_at DESC, id DESC
                     LIMIT $limit;
                     """;
             command.Parameters.AddWithValue("$pattern", "%" + EscapeLike(query.Trim()) + "%");

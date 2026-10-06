@@ -261,6 +261,23 @@ internal sealed class AppHost : IDisposable
         }
     }
 
+    /// <summary>
+    /// 把「剪贴板里装的是哪条记录」的记账序列号对齐到实时值。
+    /// <para>
+    /// 只在「已确认当前内容就是本进程写回的那条」时调用：内容身份没变、只是序列号变了，
+    /// 因此用最新序列号重新登记是安全的。不这么做的话，序列号一旦在写回后被系统推进，
+    /// 「剪贴板中」徽标与删除吊销的判定都会因对不上而失效（用户 2026-10-06 反馈的徽标丢失）。
+    /// </para>
+    /// </summary>
+    /// <param name="sequence">实时剪贴板序列号。</param>
+    private void SyncPresenceSequence(long sequence)
+    {
+        if (_presence.ItemId is { } trackedId)
+        {
+            _presence.NoteCaptured(sequence, trackedId);
+        }
+    }
+
     /// <summary>WM_CLIPBOARDUPDATE 处理（STA 线程）。</summary>
     private void OnClipboardUpdated()
     {
@@ -285,6 +302,9 @@ internal sealed class AppHost : IDisposable
             if (_selfWrite.ShouldIgnore(sequence, null, DateTimeOffset.Now))
             {
                 _log.Diag("剪贴板更新：自身写入（序列号命中），跳过");
+
+                // 兜底：把「剪贴板里是哪条记录」的记账序列号对齐到实时值（见 SyncPresenceSequence）。
+                SyncPresenceSequence(sequence);
                 return;
             }
 
@@ -351,6 +371,15 @@ internal sealed class AppHost : IDisposable
                 if (_selfWrite.ShouldIgnore(sequence, processed.ContentHash, DateTimeOffset.Now))
                 {
                     _log.Diag("剪贴板更新：自身写入（哈希命中），跳过存储");
+
+                    // 同序列号分支：内容确实是我们写回的那条（按哈希认身份），
+                    // 把记账序列号对齐到实时值，否则「剪贴板中」徽标会停在失效的序列号上。
+                    var existing = _repository!.FindByHash(processed.ContentHash);
+                    if (existing is not null)
+                    {
+                        _presence.NoteCaptured(sequence, existing.Id);
+                    }
+
                     return;
                 }
 
@@ -518,6 +547,7 @@ internal sealed class AppHost : IDisposable
         panel.PinToggleRequested += OnPinToggleRequested;
         panel.SettingsRequested += OnSettingsRequestedFromPanel;
         panel.PinnedFilterChanged += OnPinnedFilterChanged;
+        panel.ClearClipboardRequested += OnClearClipboardRequested;
         panel.SetQuotaHint(_quotaWarning);
         panel.Icon = Imaging.AppIcon.TryLoadImageSource();
         panel.HideOnClickOutside = _settings.HideOnClickOutside;
@@ -641,6 +671,43 @@ internal sealed class AppHost : IDisposable
         _pinnedOnly = pinnedOnly;
         _log.Diag($"筛选：只看收藏={pinnedOnly}");
         RefreshListAsync();
+    }
+
+    /// <summary>
+    /// 面板底部剪刀按钮：清空系统剪贴板（用户 2026-10-06 要求）。
+    /// <para>
+    /// 语义是"取消当前这次复制"：桌面右键的「粘贴」立刻变灰，但<b>历史记录一条都不动</b>
+    /// —— 这是它与「删除即吊销」的根本区别。Win+V 历史里的副本同样够不着（系统不给接口）。
+    /// </para>
+    /// </summary>
+    private void OnClearClipboardRequested()
+    {
+        try
+        {
+            var clipboard = _clipboard;
+            if (clipboard is null)
+            {
+                return;
+            }
+
+            if (!clipboard.TryClear(out var error))
+            {
+                // 被别的程序占用时如实告知，不假装成功（用户会以为清空了、其实没有）。
+                _log.Error("清空系统剪贴板失败：" + error);
+                _panel?.SetActionHint("剪贴板被其它程序占用，未能清空");
+                return;
+            }
+
+            // 剪贴板空了 → 身份记账作废（「剪贴板中」徽标随之消失）；列表本身不变，没有删任何记录。
+            _presence.Reset();
+            _log.Info("已清空系统剪贴板（历史记录未变）");
+            _panel?.SetActionHint("已清空系统剪贴板（历史记录未变）");
+            RefreshListAsync();
+        }
+        catch (Exception ex)
+        {
+            _log.Error("清空系统剪贴板时出错", ex);
+        }
     }
 
     /// <summary>粘贴：按类型写回剪贴板 → 隐藏面板 → 恢复前台窗口 → 注入 Ctrl+V。</summary>

@@ -215,8 +215,9 @@
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
-                    <!-- 操作指南用缩写给右侧两个按钮腾地方（位置不够就缩写，用户 2026-10-05 建议）；
+                    <!-- 操作指南用缩写给右侧按钮腾地方（位置不够就缩写，用户 2026-10-05 建议）；
                          完整说明挂在 ToolTip 上。 -->
                     <TextBlock x:Name="HintText"
                                Grid.Column="0"
@@ -226,10 +227,23 @@
                                TextTrimming="CharacterEllipsis"
                                ToolTip="单击选中 · 双击或 Enter 粘贴 · ↑↓ 选择 · Delete 删除 · 右键收藏 · Esc 关闭"
                                Text="单击选中 · 双击粘贴 · Del 删 · 右键收藏" />
+                    <!-- 清空系统剪贴板：只取消"当前复制的内容"，历史记录一条都不动（用户 2026-10-06 要求） -->
+                    <Button x:Name="ClearClipboardButton"
+                            Grid.Column="1"
+                            Margin="6,0,0,0"
+                            Style="{StaticResource FooterIconButtonStyle}"
+                            Click="OnClearClipboardButtonClick"
+                            ToolTip="清空系统剪贴板（只取消当前复制的内容，历史记录不受影响）">
+                        <Path Width="16"
+                              Height="16"
+                              Data="{x:Static imaging:IconGeometry.ContentCut}"
+                              Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                              Stretch="Uniform" />
+                    </Button>
                     <!-- 只看收藏：点亮成金色星标，一点即筛出收藏的条目（再点一次看全部） -->
                     <ToggleButton x:Name="PinnedFilterButton"
-                                  Grid.Column="1"
-                                  Margin="6,0,0,0"
+                                  Grid.Column="2"
+                                  Margin="4,0,0,0"
                                   Style="{StaticResource FooterToggleIconStyle}"
                                   Click="OnPinnedFilterClick"
                                   ToolTip="只看收藏（再点一次显示全部）">
@@ -241,7 +255,7 @@
                     </ToggleButton>
                     <!-- 齿轮：直接打开设置窗口（省得去托盘右键） -->
                     <Button x:Name="SettingsButton"
-                            Grid.Column="2"
+                            Grid.Column="3"
                             Margin="4,0,0,0"
                             Style="{StaticResource FooterIconButtonStyle}"
                             Click="OnSettingsButtonClick"

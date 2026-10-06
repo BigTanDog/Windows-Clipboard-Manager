@@ -180,6 +180,9 @@ public partial class PanelWindow : Window
     /// <summary>「只看收藏」开关变化（底部星形按钮）。参数 true = 只显示收藏的条目。</summary>
     public event Action<bool>? PinnedFilterChanged;
 
+    /// <summary>请求清空系统剪贴板（底部剪刀按钮）：只取消"当前复制的内容"，不动历史记录。</summary>
+    public event Action? ClearClipboardRequested;
+
     /// <summary>当前搜索词（已去除首尾空白）。</summary>
     public string CurrentQuery => SearchBox.Text.Trim();
 
@@ -237,6 +240,10 @@ public partial class PanelWindow : Window
     /// <summary>底部星形按钮：切换「只看收藏」（真正的过滤在宿主侧走数据库查询）。</summary>
     private void OnPinnedFilterClick(object sender, RoutedEventArgs e) =>
         PinnedFilterChanged?.Invoke(PinnedFilterButton.IsChecked == true);
+
+    /// <summary>底部剪刀按钮：请求清空系统剪贴板（历史记录一条不动，回执由宿主给）。</summary>
+    private void OnClearClipboardButtonClick(object sender, RoutedEventArgs e) =>
+        ClearClipboardRequested?.Invoke();
 
     /// <summary>
     /// 设置磁盘上限提示（D-09：只剩收藏仍超限时提示用户，不自动删除）。传 null 或空串即隐藏。
