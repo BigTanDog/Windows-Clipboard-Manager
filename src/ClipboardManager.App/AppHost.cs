@@ -30,9 +30,6 @@ namespace ClipboardManager.App;
 /// </summary>
 internal sealed class AppHost : IDisposable
 {
-    /// <summary>面板最多展示的记录数。</summary>
-    private const int MaxDisplayItems = 500;
-
     private readonly bool _diag;
     private readonly bool _interactive;
     private readonly int _durationSeconds;
@@ -515,9 +512,15 @@ internal sealed class AppHost : IDisposable
         return string.IsNullOrEmpty(relative) ? null : Path.Combine(AppPaths.DataDirectory, relative);
     }
 
-    private int DisplayLimit() => _settings.MaxItems < 0
-        ? MaxDisplayItems
-        : Math.Min(_settings.MaxItems, MaxDisplayItems);
+    /// <summary>
+    /// 面板显示条数：<b>固定</b>取硬上限，与设置里的「记录条数上限」解耦（用户 2026-10-06 拍板）。
+    /// <para>
+    /// 保留上限只负责淘汰；库里的记录数本就受它约束（条数 + 磁盘双上限），因此显示端固定 500 条
+    /// 不会让面板无限变长。若显示再跟着保留上限走，把上限设成 50 时库里的记录就会被
+    /// <c>LIMIT 50</c> 截断挤出列表 —— 看着像"被删了"（B-16 的用户现象）。
+    /// </para>
+    /// </summary>
+    private int DisplayLimit() => PanelDisplay.Limit(_settings.MaxItems);
 
     private void TogglePanel()
     {

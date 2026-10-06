@@ -80,7 +80,7 @@
                            TextWrapping="Wrap"
                            FontSize="12"
                            Foreground="{DynamicResource MutedTextBrush}"
-                           Text="超出上限时按「体积最大优先、同级最旧优先」淘汰；收藏的记录永不自动删除。" />
+                           Text="超出上限时按「体积最大优先、同级最旧优先」淘汰；收藏的记录永不自动删除。这一项只影响自动清理，面板最多显示最近 500 条。" />
                 <CheckBox x:Name="CaptureImagesBox" Margin="0,0,0,14" Content="记录图片（截图 / 复制的图片）" />
 
                 <!-- ─────────── 交互 ─────────── -->

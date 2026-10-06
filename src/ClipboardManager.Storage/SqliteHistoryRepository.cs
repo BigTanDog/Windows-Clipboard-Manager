@@ -158,7 +158,7 @@ public sealed class SqliteHistoryRepository : IDisposable
     }
 
     /// <summary>按最近更新时间取记录（列表用）。</summary>
-    /// <param name="limit">最多返回条数。</param>
+    /// <param name="limit">最多返回条数（显示上限固定，见 <see cref="ClipboardManager.Core.Ui.PanelDisplay"/>）。</param>
     /// <param name="pinnedOnly">true 时只返回收藏记录（面板的「只看收藏」筛选）。</param>
     public IReadOnlyList<ClipItem> GetRecent(int limit, bool pinnedOnly = false)
     {
@@ -166,6 +166,10 @@ public sealed class SqliteHistoryRepository : IDisposable
         {
             var connection = EnsureConnection();
             using var command = connection.CreateCommand();
+            // 排序是纯时间序，收藏不置顶（用户 2026-10-06 拍板回退 B-16）：
+            // 置顶会把新复制的内容一路往下推，收藏一多就得翻半天。收藏依然"看得见"靠的是
+            // 显示上限与保留上限解耦（固定 500，见 Core/Ui/PanelDisplay），不是靠排序；
+            // 想专门看收藏，用面板底部的「只看收藏」筛选（pinnedOnly 分支）。
             command.CommandText = pinnedOnly
                 ? """
                     SELECT id, type, text_content, blob_path, file_paths, preview, content_hash,
@@ -179,7 +183,7 @@ public sealed class SqliteHistoryRepository : IDisposable
                     SELECT id, type, text_content, blob_path, file_paths, preview, content_hash,
                            size_bytes, is_pinned, source_app, created_at, updated_at
                     FROM clip_items
-                    ORDER BY is_pinned DESC, updated_at DESC, id DESC
+                    ORDER BY updated_at DESC, id DESC
                     LIMIT $limit;
                     """;
             command.Parameters.AddWithValue("$limit", Math.Max(limit, 0));
@@ -469,7 +473,7 @@ public sealed class SqliteHistoryRepository : IDisposable
                     WHERE text_content LIKE $pattern ESCAPE '\'
                        OR file_paths   LIKE $pattern ESCAPE '\'
                        OR preview      LIKE $pattern ESCAPE '\'
-                    ORDER BY is_pinned DESC, updated_at DESC, id DESC
+                    ORDER BY updated_at DESC, id DESC
                     LIMIT $limit;
                     """;
             command.Parameters.AddWithValue("$pattern", "%" + EscapeLike(query.Trim()) + "%");
