@@ -29,6 +29,16 @@ public partial class PanelWindow : Window
     private readonly DispatcherTimer _searchDebounce;
     private readonly DispatcherTimer _actionHintTimer;
     private bool _contextMenuOpen;
+
+    /// <summary>
+    /// 本轮右键菜单是否执行过命令（粘贴 / 收藏 / 删除）。
+    /// <para>
+    /// 用来区分「菜单是被点菜单项关掉的」和「菜单是被点面板外部关掉的」——
+    /// 后者要顺带收起面板，前者不能（见 <see cref="OnContextMenuClosed"/>）。
+    /// </para>
+    /// </summary>
+    private bool _contextMenuCommandInvoked;
+
     private bool _singleClickPaste;
 
     /// <summary>
@@ -155,9 +165,48 @@ public partial class PanelWindow : Window
         CloseRequested?.Invoke();
     }
 
-    private void OnContextMenuOpened(object sender, RoutedEventArgs e) => _contextMenuOpen = true;
+    private void OnContextMenuOpened(object sender, RoutedEventArgs e)
+    {
+        _contextMenuOpen = true;
+        _contextMenuCommandInvoked = false;
+    }
 
-    private void OnContextMenuClosed(object sender, RoutedEventArgs e) => _contextMenuOpen = false;
+    /// <summary>
+    /// 右键菜单关闭：若这一轮菜单只是被「点面板外部」关掉的，这里补上本该发生的那次收面板。
+    /// <para>
+    /// 为什么必须在这里补（用户 2026-10-24 反馈的 bug）：点面板外部时，面板先失去激活，
+    /// 而那一刻菜单还开着 → <see cref="OnPanelDeactivated"/> 按设计跳过隐藏；菜单随后的
+    /// <c>Closed</c> 不会再带来第二次失活事件，于是面板卡在「已失活但还显示」——
+    /// 之后点哪里都不会自动关，只能点 ✕ 或先左键点一条记录"唤醒"面板。
+    /// 判定规则抽在 <see cref="PanelDismiss"/> 里（纯函数，有单测）。
+    /// </para>
+    /// <para>
+    /// 顺延到输入队列之后执行：菜单项自己的 Click 会先跑完（把 <c>_contextMenuCommandInvoked</c>
+    /// 置位），激活状态也已由系统更新到位，再据此判断才不会跟事件顺序赛跑。
+    /// </para>
+    /// </summary>
+    private void OnContextMenuClosed(object sender, RoutedEventArgs e)
+    {
+        _contextMenuOpen = false;
+
+        Dispatcher.BeginInvoke(
+            DispatcherPriority.Input,
+            new Action(() =>
+            {
+                if (!PanelDismiss.ShouldHideAfterContextMenu(
+                        HideOnClickOutside,
+                        _contextMenuCommandInvoked,
+                        _contextMenuOpen,
+                        IsActive,
+                        IsVisible))
+                {
+                    return;
+                }
+
+                _contextMenuCommandInvoked = false;
+                CloseRequested?.Invoke();
+            }));
+    }
 
     /// <summary>请求粘贴某条记录（单击或 Enter）。</summary>
     public event Action<ClipItem>? PasteRequested;
@@ -341,6 +390,9 @@ public partial class PanelWindow : Window
 
     private void OnMenuPasteClick(object sender, RoutedEventArgs e)
     {
+        // 先记「这轮菜单点了命令」：菜单随后的 Closed 不能再把面板一起收掉（粘贴流程自己会收起）。
+        _contextMenuCommandInvoked = true;
+
         if (SelectedItem is { } item)
         {
             PasteRequested?.Invoke(item);
@@ -349,6 +401,8 @@ public partial class PanelWindow : Window
 
     private void OnMenuPinClick(object sender, RoutedEventArgs e)
     {
+        _contextMenuCommandInvoked = true;
+
         if (SelectedItem is { } item)
         {
             PinToggleRequested?.Invoke(item);
@@ -357,6 +411,8 @@ public partial class PanelWindow : Window
 
     private void OnMenuDeleteClick(object sender, RoutedEventArgs e)
     {
+        _contextMenuCommandInvoked = true;
+
         if (SelectedItem is { } item)
         {
             DeleteRequested?.Invoke(item);
