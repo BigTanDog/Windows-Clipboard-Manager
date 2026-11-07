@@ -12,8 +12,8 @@ Windows 剪贴板历史工具：常驻托盘，按快捷键唤出面板，自动
 
 | 文件 | 体积 | 适合谁 |
 | --- | --- | --- |
-| [ClipboardManager_小体积_需装NET8运行时_v1.1.10.exe](release/ClipboardManager_小体积_需装NET8运行时_v1.1.10.exe) | 2.9 MB | 电脑上装过 [.NET 8 桌面运行时](https://dotnet.microsoft.com/download/dotnet/8.0)（日常使用推荐，文件小） |
-| [ClipboardManager_完整版_免装运行时_v1.1.10.exe](release/ClipboardManager_完整版_免装运行时_v1.1.10.exe) | 64.42 MB | 什么都不想装：拷到 U 盘或新电脑，双击就用 |
+| [ClipboardManager_小体积_需装NET8运行时_v1.2.0.exe](release/ClipboardManager_小体积_需装NET8运行时_v1.2.0.exe) | 2.9 MB | 电脑上装过 [.NET 8 桌面运行时](https://dotnet.microsoft.com/download/dotnet/8.0)（日常使用推荐，文件小） |
+| [ClipboardManager_完整版_免装运行时_v1.2.0.exe](release/ClipboardManager_完整版_免装运行时_v1.2.0.exe) | 64.42 MB | 什么都不想装：拷到 U 盘或新电脑，双击就用 |
 
 > 第一次运行如果没看到托盘图标，多半被 Windows 收进了「隐藏的图标」（任务栏右下角的 ^ 里），把它拖出来即可。
 
@@ -106,6 +106,10 @@ Windows 的剪贴板历史由系统自己保管，系统没有提供"按条目�
 
 **历史记录是加密的吗？**
 不是。数据以明文保存在本机 `data\` 里，脱敏只是"屏幕上不显示全"。请自行注意电脑的物理安全。
+
+**面板为什么没出现在右下角？**
+面板会贴着**任务栏所在的那条边**弹出：任务栏在下方才是右下角，在左侧就是左下角，在上方就是右上角，在右侧就是右下角。
+任务栏设为自动隐藏时看不出它在哪一边，按「下方」处理。任务栏换了位置不用重启程序，下次按热键就跟着变。
 
 ## 从源码构建
 

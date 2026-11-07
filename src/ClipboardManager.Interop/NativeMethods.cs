@@ -400,7 +400,7 @@ internal static class NativeMethods
     [DllImport("user32.dll")]
     internal static extern IntPtr MonitorFromPoint(POINT pt, uint dwFlags);
 
-    /// <summary>取显示器信息。作用：拿到工作区（已排除任务栏）用于右下角定位。注意事项：调用前必须设置 cbSize，否则返回 FALSE。</summary>
+    /// <summary>取显示器信息。作用：一次取回整屏（rcMonitor）与工作区（rcWork，已排除任务栏），供任务栏边识别与面板定位。注意事项：调用前必须设置 cbSize，否则返回 FALSE；两者必须来自同一次调用，否则差值无意义。</summary>
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static extern bool GetMonitorInfoW(IntPtr hMonitor, ref MONITORINFO lpmi);
