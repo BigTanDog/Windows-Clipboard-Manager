@@ -566,7 +566,7 @@ internal sealed class AppHost : IDisposable
         return panel;
     }
 
-    /// <summary>显示面板：记录前台窗口 → 定位右下角 → 显示并取焦点 → 记录弹出耗时。</summary>
+    /// <summary>显示面板：记录前台窗口 → 贴任务栏边定位 → 显示并取焦点 → 记录弹出耗时。</summary>
     private void ShowPanel()
     {
         var firstShow = _panel is null;
@@ -592,14 +592,13 @@ internal sealed class AppHost : IDisposable
 
         var handle = new WindowInteropHelper(panel).Handle;
         var dpi = ScreenLocator.GetDpiForWindow(handle);
-        if (ScreenLocator.TryGetCursorWorkArea(out var workArea))
+        var edge = TaskbarEdge.Bottom;
+
+        // 每次弹出都重新判断任务栏在哪条边，不缓存：任务栏换边后下一次呼出即刻生效。
+        if (ScreenLocator.TryGetCursorScreen(out var monitor, out var work))
         {
-            var (left, top) = PanelPositioning.ComputeBottomRight(
-                workArea.Right,
-                workArea.Bottom,
-                panel.Width,
-                panel.Height,
-                dpi);
+            edge = PanelPositioning.DetectTaskbarEdge(monitor, work);
+            var (left, top) = PanelPositioning.Compute(work, edge, panel.Width, panel.Height, dpi);
             panel.Left = left;
             panel.Top = top;
         }
@@ -612,7 +611,7 @@ internal sealed class AppHost : IDisposable
         panel.Dispatcher.Invoke(static () => { }, DispatcherPriority.Render);
         watch.Stop();
 
-        _log.Info($"PANEL_SHOWN elapsedMs={watch.Elapsed.TotalMilliseconds:F1} dpi={dpi} firstShow={firstShow}");
+        _log.Info($"PANEL_SHOWN elapsedMs={watch.Elapsed.TotalMilliseconds:F1} dpi={dpi} edge={edge} firstShow={firstShow}");
     }
 
     private void HidePanel() => _panel?.Hide();

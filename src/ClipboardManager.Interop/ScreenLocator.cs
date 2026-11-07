@@ -1,36 +1,33 @@
 using System.Runtime.InteropServices;
+using ClipboardManager.Core.Ui;
 
 namespace ClipboardManager.Interop;
 
-/// <summary>目标显示器工作区（物理像素，已排除任务栏）。</summary>
-/// <param name="Left">工作区左边界（物理像素）。</param>
-/// <param name="Top">工作区上边界（物理像素）。</param>
-/// <param name="Right">工作区右边界（物理像素）。</param>
-/// <param name="Bottom">工作区下边界（物理像素）。</param>
-public readonly record struct WorkArea(int Left, int Top, int Right, int Bottom);
-
 /// <summary>
 /// 多显示器与 DPI 查询（需求 §5.7）。
-/// 面板定位默认落在<b>光标所在显示器</b>的右下角（D-05）。
+/// 面板定位默认落在<b>光标所在显示器</b>（D-05），并按该屏任务栏所在边贴合（D-05 修订）。
 /// </summary>
 public static class ScreenLocator
 {
     /// <summary>
-    /// 取光标所在显示器的工作区（物理像素）。
+    /// 取光标所在显示器的整屏矩形与工作区（均为物理像素）。返回 false 表示查询失败，调用方保持原位。
+    /// 注意事项：整屏与工作区之差就是任务栏占用的一条边（见 <see cref="PanelPositioning.DetectTaskbarEdge"/>），
+    /// 因此两者必须来自<b>同一次</b> <c>GetMonitorInfoW</c> 调用，不能一次取整屏、一次取工作区。
     /// </summary>
-    /// <param name="dpi">该显示器的 DPI（由调用方通过 <see cref="GetDpiForWindow"/> 提供）。</param>
-    /// <param name="workArea">工作区（失败时回退到主屏尺寸）。</param>
-    public static bool TryGetCursorWorkArea(out WorkArea workArea)
+    /// <param name="monitor">整屏矩形（rcMonitor）。</param>
+    /// <param name="work">工作区（rcWork，已排除任务栏）。</param>
+    public static bool TryGetCursorScreen(out ScreenRect monitor, out ScreenRect work)
     {
-        workArea = default;
+        monitor = default;
+        work = default;
 
         if (!NativeMethods.GetCursorPos(out var point))
         {
             return false;
         }
 
-        var monitor = NativeMethods.MonitorFromPoint(point, NativeMethods.MONITOR_DEFAULTTONEAREST);
-        if (monitor == IntPtr.Zero)
+        var handle = NativeMethods.MonitorFromPoint(point, NativeMethods.MONITOR_DEFAULTTONEAREST);
+        if (handle == IntPtr.Zero)
         {
             return false;
         }
@@ -40,12 +37,13 @@ public static class ScreenLocator
             cbSize = (uint)Marshal.SizeOf<NativeMethods.MONITORINFO>(),
         };
 
-        if (!NativeMethods.GetMonitorInfoW(monitor, ref info))
+        if (!NativeMethods.GetMonitorInfoW(handle, ref info))
         {
             return false;
         }
 
-        workArea = new WorkArea(info.rcWork.Left, info.rcWork.Top, info.rcWork.Right, info.rcWork.Bottom);
+        monitor = new ScreenRect(info.rcMonitor.Left, info.rcMonitor.Top, info.rcMonitor.Right, info.rcMonitor.Bottom);
+        work = new ScreenRect(info.rcWork.Left, info.rcWork.Top, info.rcWork.Right, info.rcWork.Bottom);
         return true;
     }
 
